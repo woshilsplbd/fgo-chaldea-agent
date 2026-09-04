@@ -1,7 +1,11 @@
 import json
+from pathlib import Path
+from tempfile import TemporaryDirectory
 from unittest.mock import patch
 
 import requests
+from django.core.management import call_command
+from django.core.management.base import CommandError
 from django.test import override_settings
 from django.test import Client, TestCase
 from django.urls import reverse
@@ -290,3 +294,172 @@ class DifyServiceTests(TestCase):
         self.assertEqual(response.json()["code"], "agent_service_error")
         self.assertNotIn("raw provider secret body", body)
         self.assertNotIn("test-dify-key", body)
+
+
+class AgentEvaluationCommandTests(TestCase):
+    def write_cases(self, directory, cases=None):
+        cases = cases or [
+            {
+                "id": "case-1",
+                "category": "knowledge_hit",
+                "question": "first",
+                "source": "source-1",
+                "expected_facts": ["fact-1"],
+                "forbidden_claims": [],
+            },
+            {
+                "id": "case-2",
+                "category": "knowledge_hit",
+                "question": "second",
+                "source": "source-2",
+                "expected_facts": ["fact-2"],
+                "forbidden_claims": ["claim-2"],
+            },
+            {
+                "id": "group-a-1",
+                "category": "follow_up",
+                "conversation_group": "group-a",
+                "turn": 1,
+                "question": "group first",
+                "source": "source-a",
+                "expected_facts": [],
+                "forbidden_claims": [],
+            },
+            {
+                "id": "group-a-2",
+                "category": "follow_up",
+                "conversation_group": "group-a",
+                "turn": 2,
+                "question": "group second",
+                "source": "source-a",
+                "expected_facts": [],
+                "forbidden_claims": [],
+            },
+            {
+                "id": "group-b-1",
+                "category": "follow_up",
+                "conversation_group": "group-b",
+                "turn": 1,
+                "question": "other group",
+                "source": "source-b",
+                "expected_facts": [],
+                "forbidden_claims": [],
+            },
+        ]
+        path = Path(directory) / "cases.json"
+        path.write_text(json.dumps(cases, ensure_ascii=False), encoding="utf-8")
+        return path
+
+    @override_settings(DIFY_API_BASE_URL="https://dify.example/v1", DIFY_API_KEY="dummy")
+    @patch("apps.agent.management.commands.evaluate_agent.services.chat")
+    def test_runner_writes_metadata_and_isolates_conversations(self, chat):
+        calls = []
+
+        def provider(message, conversation_id=None):
+            calls.append((message, conversation_id))
+            return {
+                "answer": "answer for " + message,
+                "conversation_id": "conv-a" if message == "group first" else None,
+                "message_id": "message-1",
+            }
+
+        chat.side_effect = provider
+        with TemporaryDirectory() as directory:
+            cases = self.write_cases(directory)
+            output = Path(directory) / "results.json"
+            call_command("evaluate_agent", cases=str(cases), output=str(output))
+            output_text = output.read_text(encoding="utf-8")
+            payload = json.loads(output_text)
+
+        self.assertEqual([item[1] for item in calls], [None, None, None, "conv-a", None])
+        self.assertFalse(payload["retrieval_used"])
+        self.assertEqual(payload["results"][1]["expected_facts"], ["fact-2"])
+        self.assertEqual(payload["results"][1]["source"], "source-2")
+        self.assertEqual(payload["results"][0]["status"], "success")
+        self.assertIn("elapsed_seconds", payload["results"][0])
+        self.assertNotIn("dummy", output_text)
+
+    @override_settings(DIFY_API_BASE_URL="https://dify.example/v1", DIFY_API_KEY="dummy")
+    @patch("apps.agent.management.commands.evaluate_agent.services.chat")
+    def test_provider_failure_is_recorded_without_exception_details(self, chat):
+        chat.side_effect = [
+            services.AgentServiceError("private upstream body"),
+            {"answer": "safe", "conversation_id": None, "message_id": None},
+        ]
+        with TemporaryDirectory() as directory:
+            cases = self.write_cases(directory, cases=[
+                {
+                    "id": "failure",
+                    "category": "knowledge_hit",
+                    "question": "first",
+                    "source": "source",
+                    "expected_facts": [],
+                    "forbidden_claims": [],
+                },
+                {
+                    "id": "success",
+                    "category": "knowledge_hit",
+                    "question": "second",
+                    "source": "source",
+                    "expected_facts": [],
+                    "forbidden_claims": [],
+                },
+            ])
+            output = Path(directory) / "results.json"
+            call_command("evaluate_agent", cases=str(cases), output=str(output))
+            text = output.read_text(encoding="utf-8")
+            payload = json.loads(text)
+
+        self.assertEqual(payload["results"][0]["status"], "error")
+        self.assertEqual(payload["results"][0]["error"]["code"], "agent_service_error")
+        self.assertNotIn("private upstream body", text)
+        self.assertEqual(payload["results"][1]["status"], "success")
+
+    @override_settings(DIFY_API_BASE_URL="https://dify.example/v1", DIFY_API_KEY="dummy")
+    def test_malformed_cases_json_fails_clearly(self):
+        with TemporaryDirectory() as directory:
+            cases = Path(directory) / "cases.json"
+            cases.write_text("{broken", encoding="utf-8")
+            output = Path(directory) / "results.json"
+
+            with self.assertRaisesRegex(CommandError, "invalid cases JSON"):
+                call_command("evaluate_agent", cases=str(cases), output=str(output))
+
+    @override_settings(DIFY_API_BASE_URL="https://dify.example/v1", DIFY_API_KEY="dummy")
+    def test_invalid_case_schema_fails_clearly(self):
+        with TemporaryDirectory() as directory:
+            cases = self.write_cases(directory, cases=[{"id": "incomplete"}])
+            output = Path(directory) / "results.json"
+
+            with self.assertRaisesRegex(CommandError, "missing fields"):
+                call_command("evaluate_agent", cases=str(cases), output=str(output))
+
+    @override_settings(DIFY_API_BASE_URL="", DIFY_API_KEY="")
+    @patch("apps.agent.management.commands.evaluate_agent.services.chat")
+    def test_missing_configuration_fails_before_evaluation(self, chat):
+        with TemporaryDirectory() as directory:
+            cases = self.write_cases(directory)
+            output = Path(directory) / "results.json"
+
+            with self.assertRaisesRegex(CommandError, "DIFY_API_BASE_URL"):
+                call_command("evaluate_agent", cases=str(cases), output=str(output))
+
+        chat.assert_not_called()
+
+    @override_settings(DIFY_API_BASE_URL="https://dify.example/v1", DIFY_API_KEY="dummy")
+    @patch("apps.agent.management.commands.evaluate_agent.services.chat")
+    def test_existing_output_requires_explicit_overwrite(self, chat):
+        chat.return_value = {"answer": "safe", "conversation_id": None, "message_id": None}
+        with TemporaryDirectory() as directory:
+            cases = self.write_cases(directory)
+            output = Path(directory) / "results.json"
+            call_command("evaluate_agent", cases=str(cases), output=str(output))
+
+            with self.assertRaisesRegex(CommandError, "output already exists"):
+                call_command("evaluate_agent", cases=str(cases), output=str(output))
+            call_command(
+                "evaluate_agent",
+                cases=str(cases),
+                output=str(output),
+                overwrite=True,
+            )

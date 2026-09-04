@@ -1,0 +1,236 @@
+[
+  {
+    "id": "rag-001",
+    "category": "knowledge_hit",
+    "question": "What is the role of Chaldea in the project's world explanation?",
+    "source": "aboutApp/templates/survey.html — 人理续存保障机构 · 迦勒底",
+    "expected_facts": [
+      "Chaldea is described as an organization intended to prevent the collapse of Human Order.",
+      "The page describes observation of history and the future through Sheba."
+    ],
+    "forbidden_claims": [
+      "External canon details that are not present in the cited page."
+    ],
+    "notes": "Use only the project-authored world-setting summary."
+  },
+  {
+    "id": "rag-002",
+    "category": "knowledge_hit",
+    "question": "What is a Singularity according to the archive?",
+    "source": "aboutApp/templates/survey.html — 特异点 · 人理奠基",
+    "expected_facts": [
+      "A Singularity is described as a distorted historical node where causality deviates.",
+      "The Master must investigate the anomaly and repair Human Order foundations."
+    ],
+    "forbidden_claims": [
+      "A complete official list of Singularities not present in the source."
+    ],
+    "notes": "This is an explanatory lore question, not a live game-data lookup."
+  },
+  {
+    "id": "rag-003",
+    "category": "knowledge_hit",
+    "question": "What is the spiritron transfer room described as doing?",
+    "source": "aboutApp/templates/honor.html — 灵子转移室",
+    "expected_facts": [
+      "It converts a Master's soul into spiritron data.",
+      "It projects the data to a target time and space.",
+      "The page includes a warning about risks to the Master."
+    ],
+    "forbidden_claims": [
+      "Operational or scientific details beyond the authored page."
+    ],
+    "notes": "The page is project-authored and should be treated as unofficial."
+  },
+  {
+    "id": "rag-004",
+    "category": "knowledge_hit",
+    "question": "Which Chaldea departments and responsibilities are listed?",
+    "source": "aboutApp/templates/honor.html — 机构组成",
+    "expected_facts": [
+      "The page lists Sheba observation.",
+      "The page lists Servant summoning.",
+      "The page lists spiritron transfer.",
+      "The page lists medical and logistics responsibilities."
+    ],
+    "forbidden_claims": [
+      "Departments that are not listed on the page."
+    ],
+    "notes": "Keep the answer within the department descriptions in the source."
+  },
+  {
+    "id": "rag-005",
+    "category": "knowledge_hit",
+    "question": "What is the basic gameplay loop presented for a new Master?",
+    "source": "serviceApp/templates/download.html — 游戏基础",
+    "expected_facts": [
+      "The page describes clearing quests/free quests to obtain materials.",
+      "It then describes strengthening Servants.",
+      "It then describes challenging harder content."
+    ],
+    "forbidden_claims": [
+      "Current AP costs, farming rates, or progression guarantees."
+    ],
+    "notes": "This is a beginner-guide summary from the repository."
+  },
+  {
+    "id": "rag-007",
+    "category": "knowledge_hit",
+    "question": "What activities are included in Servant growth?",
+    "source": "serviceApp/templates/download.html — 从者养成",
+    "expected_facts": [
+      "The page names leveling.",
+      "The page names Ascension.",
+      "The page names skill strengthening.",
+      "The page names Servant Coins."
+    ],
+    "forbidden_claims": [
+      "A universal optimal build order not stated by the source."
+    ],
+    "notes": "Do not turn the list into a current optimization recommendation."
+  },
+  {
+    "id": "rag-008",
+    "category": "knowledge_hit",
+    "question": "What does 3T farming mean in the strategy page?",
+    "source": "serviceApp/templates/platform.html — 周回攻略",
+    "expected_facts": [
+      "The page describes repeated farming with a goal of compressing runs to three turns.",
+      "It associates the approach with AoE Servants and charge support."
+    ],
+    "forbidden_claims": [
+      "That one specific team always works."
+    ],
+    "notes": "The page contains strategy advice that may require later version review."
+  },
+  {
+    "id": "rag-009",
+    "category": "knowledge_hit",
+    "question": "What countermeasures does the high-difficulty section mention?",
+    "source": "serviceApp/templates/platform.html — 高难攻略",
+    "expected_facts": [
+      "It mentions single-target damage for focused output.",
+      "It mentions Ignore Invincible for evade or invincibility situations.",
+      "It mentions debuff cleansing and buff removal preparation."
+    ],
+    "forbidden_claims": [
+      "A guaranteed solution for an unspecified quest."
+    ],
+    "notes": "Keep the answer at the level of countermeasure types in the source."
+  },
+  {
+    "id": "rag-010",
+    "category": "knowledge_hit",
+    "question": "What does the page recommend considering when building a team?",
+    "source": "serviceApp/templates/platform.html — 编队策略",
+    "expected_facts": [
+      "It recommends considering class advantage.",
+      "It describes a damage dealer, general support, and an emergency option as team roles."
+    ],
+    "forbidden_claims": [
+      "Servant-specific stats or current meta rankings."
+    ],
+    "notes": "This is a general strategy explanation, not a servant lookup."
+  },
+  {
+    "id": "rag-011",
+    "category": "knowledge_hit",
+    "question": "What are the three command-card types and their stated roles?",
+    "source": "scienceApp/templates/science.html — 三种指令卡详解",
+    "expected_facts": [
+      "The page names Buster, Arts, and Quick.",
+      "It describes Buster as the high-damage type, Arts as the NP-oriented type, and Quick as the star-oriented type."
+    ],
+    "forbidden_claims": [
+      "Unstated exact multipliers or version-specific formulas."
+    ],
+    "notes": "Use the roles stated by the project page and flag version-sensitive numbers."
+  },
+  {
+    "id": "rag-012",
+    "category": "knowledge_hit",
+    "question": "What is the difference between single-target, AoE, and support Noble Phantasms in the page?",
+    "source": "scienceApp/templates/science.html — 宝具类型",
+    "expected_facts": [
+      "Single-target Noble Phantasms are described as damaging one enemy.",
+      "AoE Noble Phantasms are described as damaging all enemies.",
+      "Support Noble Phantasms are described as providing effects such as buffs, recovery, or revival rather than direct attack."
+    ],
+    "forbidden_claims": [
+      "Servant data not named in that section."
+    ],
+    "notes": "This case evaluates concept retrieval, not structured servant facts."
+  },
+  {
+    "id": "rag-013",
+    "category": "retrieval_discrimination",
+    "question": "Which source discusses Ascension stages and final artwork, and which source discusses 3T farming?",
+    "source": "scienceApp/templates/science.html — 灵基再临; serviceApp/templates/platform.html — 周回攻略",
+    "expected_facts": [
+      "Ascension stages and final artwork come from the science page's 灵基再临 section.",
+      "3T farming comes from the strategy page's 周回攻略 section."
+    ],
+    "forbidden_claims": [
+      "Blending farming advice into Ascension facts."
+    ],
+    "notes": "The answer should keep the two retrieved topics distinct."
+  },
+  {
+    "id": "rag-014",
+    "category": "retrieval_discrimination",
+    "question": "Is Human Order repair a world-setting explanation or a servant-record lookup?",
+    "source": "aboutApp/templates/survey.html; contrast with v2/apps/servants/services.py",
+    "expected_facts": [
+      "It is a world-setting explanation supported by survey.html.",
+      "It is not a structured servant-record lookup."
+    ],
+    "forbidden_claims": [
+      "A servant class, rarity, or ID answer."
+    ],
+    "notes": "This case checks the RAG/Tool Calling boundary."
+  },
+  {
+    "id": "rag-015",
+    "category": "follow_up",
+    "conversation_group": "followup-001",
+    "turn": 1,
+    "question": "What class-advantage discussion does the strategy page provide?",
+    "source": "serviceApp/templates/platform.html — 编队策略",
+    "expected_facts": [
+      "The page discusses class advantage as a team-building consideration.",
+      "It gives a general class-counter discussion."
+    ],
+    "forbidden_claims": [
+      "Current servant rankings or a guaranteed team."
+    ],
+    "notes": "First turn of the follow-up group; start with no conversation ID."
+  },
+  {
+    "id": "rag-016",
+    "category": "follow_up",
+    "conversation_group": "followup-001",
+    "turn": 2,
+    "question": "After that class-advantage discussion, which team-building considerations does the same strategy page add?",
+    "source": "serviceApp/templates/platform.html — 编队策略",
+    "expected_facts": [
+      "The follow-up remains grounded in class advantage.",
+      "It adds the damage-dealer, general-support, and emergency-role considerations from the same section."
+    ],
+    "forbidden_claims": [
+      "A new team composition not present in the source."
+    ],
+    "notes": "Second turn must reuse only followup-001's provider conversation ID."
+  },
+  {
+    "id": "rag-017",
+    "category": "out_of_scope_structured_fact",
+    "question": "What is servant X's exact current skill cooldown and rarity?",
+    "source": "Out of scope for the initial RAG set; future Tool Calling boundary: v2/apps/servants/services.py",
+    "expected_facts": [],
+    "forbidden_claims": [
+      "Any guessed skill, cooldown, rarity, or servant identity.",
+      "Treating structured Atlas-backed data as if it were present in the RAG corpus."
+    ],
+    "notes": "A grounded response should state that the initial knowledge base does not contain this structured record."
+  }
+]
