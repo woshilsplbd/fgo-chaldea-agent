@@ -39,7 +39,8 @@ def _env_positive_float(name, default):
     return parsed if parsed > 0 else default
 
 
-DEBUG = _env_bool("DJANGO_DEBUG", default=True)
+_render_hostname = os.environ.get("RENDER_EXTERNAL_HOSTNAME", "").strip()
+DEBUG = _env_bool("DJANGO_DEBUG", default=not bool(_render_hostname))
 
 # Dify configuration is optional until a provider is deliberately configured.
 DIFY_API_BASE_URL = os.environ.get("DIFY_API_BASE_URL", "").strip()
@@ -68,6 +69,8 @@ ALLOWED_HOSTS = [
     for host in _allowed_hosts_value.split(",")
     if host.strip()
 ] or _default_allowed_hosts
+if _render_hostname and _render_hostname not in ALLOWED_HOSTS:
+    ALLOWED_HOSTS.append(_render_hostname)
 
 
 INSTALLED_APPS = [
@@ -86,6 +89,7 @@ INSTALLED_APPS = [
 
 MIDDLEWARE = [
     "django.middleware.security.SecurityMiddleware",
+    "whitenoise.middleware.WhiteNoiseMiddleware",
     "django.contrib.sessions.middleware.SessionMiddleware",
     "django.middleware.common.CommonMiddleware",
     "django.middleware.csrf.CsrfViewMiddleware",
@@ -162,6 +166,14 @@ USE_TZ = True
 STATIC_URL = "static/"
 STATIC_ROOT = BASE_DIR / "staticfiles"
 STATICFILES_DIRS = [BASE_DIR / "static"]
+STORAGES = {
+    "default": {
+        "BACKEND": "django.core.files.storage.FileSystemStorage",
+    },
+    "staticfiles": {
+        "BACKEND": "whitenoise.storage.CompressedManifestStaticFilesStorage",
+    },
+}
 
 MEDIA_URL = "media/"
 MEDIA_ROOT = BASE_DIR / "media"
