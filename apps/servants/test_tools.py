@@ -82,6 +82,44 @@ class ServantToolApiTests(TestCase):
 
     @override_settings(AGENT_TOOL_API_TOKEN=token)
     @patch("apps.servants.tool_views.services.fetch_atlas_servant_detail")
+    def test_id_lookup_ignores_empty_optional_name_values(self, fetch_detail):
+        fetch_detail.return_value = self.detail_payload()
+
+        for empty_name in (None, "", "   "):
+            with self.subTest(empty_name=empty_name):
+                fetch_detail.reset_mock()
+                response = self.post(
+                    {"servant_id": 42, "name": empty_name},
+                    token=self.token,
+                )
+
+                self.assertEqual(response.status_code, 200)
+                fetch_detail.assert_called_once_with(42)
+
+    @override_settings(AGENT_TOOL_API_TOKEN=token)
+    @patch("apps.servants.tool_views.services.fetch_atlas_servant_detail")
+    @patch("apps.servants.tool_views.services.fetch_servants")
+    def test_name_lookup_ignores_empty_optional_id_values(self, fetch_servants, fetch_detail):
+        fetch_servants.return_value = [
+            {"id": 42, "collectionNo": 42, "name": "Oberon", "className": "pretender", "rarity": 5}
+        ]
+        fetch_detail.return_value = self.detail_payload()
+
+        for empty_id in (None, "", "   "):
+            with self.subTest(empty_id=empty_id):
+                fetch_servants.reset_mock()
+                fetch_detail.reset_mock()
+                response = self.post(
+                    {"servant_id": empty_id, "name": " Oberon "},
+                    token=self.token,
+                )
+
+                self.assertEqual(response.status_code, 200)
+                fetch_servants.assert_called_once_with("all")
+                fetch_detail.assert_called_once_with(42)
+
+    @override_settings(AGENT_TOOL_API_TOKEN=token)
+    @patch("apps.servants.tool_views.services.fetch_atlas_servant_detail")
     @patch("apps.servants.tool_views.services.fetch_servants")
     def test_name_lookup_is_trimmed_and_exact_case_insensitive(self, fetch_servants, fetch_detail):
         fetch_servants.return_value = [
@@ -108,6 +146,12 @@ class ServantToolApiTests(TestCase):
         self.assertEqual(response.json()["code"], "invalid_request")
 
     @override_settings(AGENT_TOOL_API_TOKEN=token)
+    def test_only_empty_selectors_return_400(self):
+        response = self.post({"servant_id": None, "name": ""}, token=self.token)
+        self.assertEqual(response.status_code, 400)
+        self.assertEqual(response.json()["code"], "invalid_request")
+
+    @override_settings(AGENT_TOOL_API_TOKEN=token)
     def test_both_selectors_return_400(self):
         response = self.post({"servant_id": 42, "name": "Oberon"}, token=self.token)
         self.assertEqual(response.status_code, 400)
@@ -115,7 +159,7 @@ class ServantToolApiTests(TestCase):
 
     @override_settings(AGENT_TOOL_API_TOKEN=token)
     def test_invalid_servant_id_returns_400(self):
-        for value in (0, -1, "42", True, None):
+        for value in (0, -1, "42", "abc", True, None):
             with self.subTest(value=value):
                 response = self.post({"servant_id": value}, token=self.token)
                 self.assertEqual(response.status_code, 400)

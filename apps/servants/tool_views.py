@@ -100,6 +100,14 @@ def _lookup_detail(servant_id):
     return _compact_detail(detail)
 
 
+def _is_meaningful_selector(value):
+    if value is None:
+        return False
+    if isinstance(value, str):
+        return bool(value.strip())
+    return True
+
+
 @csrf_exempt  # Machine-to-machine Bearer auth replaces cookie-based CSRF here.
 def servant_tool(request):
     """Authenticated, read-only Agent lookup boundary for structured Servant data."""
@@ -124,8 +132,8 @@ def servant_tool(request):
     if not isinstance(payload, dict) or set(payload) - TOOL_FIELDS:
         return _error("invalid_request", "Invalid request.", 400)
 
-    has_id = "servant_id" in payload
-    has_name = "name" in payload
+    has_id = "servant_id" in payload and _is_meaningful_selector(payload["servant_id"])
+    has_name = "name" in payload and _is_meaningful_selector(payload["name"])
     if has_id == has_name:
         return _error("invalid_request", "Provide exactly one lookup selector.", 400)
 
