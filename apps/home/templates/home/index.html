@@ -1,0 +1,208 @@
+{% extends "base.html" %}
+{% load static %}
+{% block title %}
+首页
+{% endblock %}
+{% block content %}
+<style>
+    .chaldea-hero {
+        color: #fff;
+        background:
+            radial-gradient(circle at 18% 18%, rgba(216, 180, 254, .36), transparent 34%),
+            linear-gradient(125deg, rgba(20, 8, 42, .58), rgba(88, 28, 135, .66) 46%, rgba(15, 23, 42, .82)),
+            url("{% static 'img/bbdubai.jpg' %}") center center/cover no-repeat;
+        min-height: 420px;
+        display: flex;
+        align-items: center;
+        background-color: #12051f;
+    }
+
+    .chaldea-hero h1 {
+        margin: 0 0 18px;
+        font-size: 46px;
+        font-weight: 700;
+        letter-spacing: 0;
+    }
+
+    .chaldea-hero p {
+        max-width: 680px;
+        font-size: 18px;
+        line-height: 1.9;
+    }
+
+    .hero-actions {
+        margin-top: 28px;
+    }
+
+    .hero-actions .btn {
+        margin-right: 12px;
+        padding: 10px 24px;
+        border-radius: 4px;
+    }
+
+    .section-block {
+        padding: 42px 0;
+    }
+
+    .section-title {
+        margin-bottom: 24px;
+        color: #172554;
+        font-size: 26px;
+        font-weight: 700;
+        text-align: center;
+    }
+
+    .archive-card {
+        min-height: 190px;
+        padding: 24px;
+        border: 1px solid #e5e7eb;
+        border-radius: 6px;
+        background: #fff;
+    }
+
+    .archive-card h3 {
+        margin-top: 0;
+        color: #1d4ed8;
+        font-size: 20px;
+        font-weight: 700;
+    }
+
+    .archive-card p {
+        color: #475569;
+        line-height: 1.8;
+    }
+
+    .intel-strip {
+        background: #f8fafc;
+    }
+
+    .intel-item {
+        padding: 18px 0;
+        border-bottom: 1px solid #e5e7eb;
+    }
+
+    .intel-item:last-child {
+        border-bottom: 0;
+    }
+
+    .intel-type {
+        display: inline-block;
+        width: 86px;
+        color: #1d4ed8;
+        font-weight: 700;
+    }
+
+    .servant-panel {
+        color: #fff;
+        background:
+            linear-gradient(rgba(15, 23, 42, .68), rgba(17, 24, 39, .84)),
+            url("{% static 'img/sakurafive.png' %}") center center/cover no-repeat;
+        padding: 44px 0;
+        background-color: #111827;
+    }
+
+    .servant-panel h2 {
+        margin-top: 0;
+        font-size: 28px;
+        font-weight: 700;
+    }
+
+    .servant-panel p {
+        font-size: 16px;
+        line-height: 1.9;
+    }
+
+    @media (max-width: 767px) {
+        .chaldea-hero {
+            min-height: 360px;
+        }
+
+        .chaldea-hero h1 {
+            font-size: 34px;
+        }
+
+        .archive-card {
+            margin-bottom: 18px;
+        }
+    }
+</style>
+
+<div class="chaldea-hero">
+    <div class="container">
+        <h1>迦勒底档案馆</h1>
+        <p>欢迎，御主。这里收录特异点观测记录、英灵灵基资料、活动情报与召唤公告，是为 FGO 爱好者整理的非官方同人档案站。</p>
+        <div class="hero-actions">
+            <!-- Future news migration will restore this route. -->
+            <a class="btn btn-primary" href="#">查看主线剧情</a>
+            <!-- Future servant migration will restore this route. -->
+            <a class="btn btn-default" href="#">浏览英灵资料</a>
+        </div>
+    </div>
+</div>
+
+<div class="container section-block">
+    <h2 class="section-title">档案入口</h2>
+    <div class="row">
+        <div class="col-sm-4">
+            <div class="archive-card">
+                <h3>世界观介绍</h3>
+                <p>从人理续存保障机构到特异点修复，整理迦勒底与御主旅程中的关键设定。</p>
+                <!-- Future content-app migration will restore this route. -->
+                <a href="#">进入关于迦勒底</a>
+            </div>
+        </div>
+        <div class="col-sm-4">
+            <div class="archive-card">
+                <h3>英灵图鉴</h3>
+                <p>按职阶、阵营与登场章节梳理从者信息，方便快速回顾角色背景与宝具印象。</p>
+                <!-- Future servant migration will restore this route. -->
+                <a href="#">查看英灵图鉴</a>
+            </div>
+        </div>
+        <div class="col-sm-4">
+            <div class="archive-card">
+                <h3>灵基研究室</h3>
+                <p>记录配队思路、养成观察与战斗机制笔记，为御主的下一场攻略做准备。</p>
+                <!-- Future content-app migration will restore this route. -->
+                <a href="#">进入研究室</a>
+            </div>
+        </div>
+    </div>
+</div>
+
+<div class="intel-strip section-block">
+    <div class="container">
+        <h2 class="section-title">活动情报</h2>
+        <div class="intel-item">
+            <span class="intel-type">主线剧情</span>
+            <!-- Future news migration will restore this route. -->
+            <a href="#">人理修复记录持续整理中，按章节归档剧情关键节点。</a>
+        </div>
+        <div class="intel-item">
+            <span class="intel-type">限时活动</span>
+            <!-- Future news migration will restore this route. -->
+            <a href="#">活动副本、商店兑换与高难关卡信息集中收录。</a>
+        </div>
+        <div class="intel-item">
+            <span class="intel-type">召唤公告</span>
+            <!-- Future news migration will restore this route. -->
+            <a href="#">记录卡池开放、推荐召唤与从者复刻情报。</a>
+        </div>
+    </div>
+</div>
+
+<div class="servant-panel">
+    <div class="container">
+        <div class="row">
+            <div class="col-sm-12">
+                <h2>英灵资料</h2>
+                <p>汇集 Saber、Archer、Lancer、Rider、Caster、Assassin、Berserker 及 Extra 职阶的从者档案。数据源自 Atlas Academy 数据库，按职阶分类检索。</p>
+                <div style="margin-top:16px">
+                    <!-- Future servant migration will restore this route. -->
+                    <a class="btn btn-default" href="#">进入英灵资料</a>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}

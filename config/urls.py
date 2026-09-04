@@ -1,15 +1,10 @@
 """Minimal URL configuration for the isolated V2 foundation."""
 
 from django.contrib import admin
-from django.urls import path
-from django.views.generic import TemplateView
+from django.urls import include, path
 
 
 urlpatterns = [
-    path(
-        "",
-        TemplateView.as_view(template_name="shell_preview.html"),
-        name="shell_preview",
-    ),
+    path("", include("apps.home.urls")),
     path("admin/", admin.site.urls),
 ]
