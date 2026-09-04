@@ -46,6 +46,9 @@ DIFY_API_BASE_URL = os.environ.get("DIFY_API_BASE_URL", "").strip()
 DIFY_API_KEY = os.environ.get("DIFY_API_KEY", "").strip()
 DIFY_TIMEOUT_SECONDS = _env_positive_float("DIFY_TIMEOUT_SECONDS", 30.0)
 
+# Backend-only token for the authenticated machine-to-machine Servant Tool.
+AGENT_TOOL_API_TOKEN = os.environ.get("AGENT_TOOL_API_TOKEN", "").strip()
+
 # This fallback is development-only. Production must provide
 # DJANGO_SECRET_KEY explicitly.
 SECRET_KEY = os.environ.get("DJANGO_SECRET_KEY")

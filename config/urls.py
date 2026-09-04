@@ -10,6 +10,7 @@ from apps.servants.urls import page_urlpatterns
 urlpatterns = [
     path("", include("apps.home.urls")),
     path("api/servants/", include("apps.servants.urls")),
+    path("api/tools/servant/", include("apps.servants.tool_urls")),
     path("servants/", include((page_urlpatterns, "servants"), namespace="servants")),
     path("news/", include("apps.news.urls")),
     path("agent/", include("apps.agent.urls")),
