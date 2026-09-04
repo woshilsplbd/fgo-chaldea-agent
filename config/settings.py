@@ -59,6 +59,7 @@ INSTALLED_APPS = [
     "apps.home",
     "apps.servants",
     "apps.news",
+    "apps.agent",
 ]
 
 

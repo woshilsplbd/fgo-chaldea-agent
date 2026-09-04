@@ -1,0 +1,35 @@
+{% extends "base.html" %}
+
+{% block title %}迦勒底智能终端{% endblock %}
+
+{% block content %}
+<main id="agent-chat" class="fgo-page">
+    <div class="container">
+        <div class="row">
+            <div class="col-md-10 col-md-offset-1">
+                <header class="fgo-card">
+                    <h1 class="fgo-section-header">迦勒底智能终端</h1>
+                    <p>Chaldea Agent 将帮助你查询和理解 FGO 游戏知识。</p>
+                    <p class="text-muted">当前为展示骨架，后续阶段将接入 Agent 对话能力。</p>
+                </header>
+
+                <section class="fgo-card" aria-labelledby="agent-conversation-title">
+                    <h2 id="agent-conversation-title">Chaldea Agent</h2>
+                    <div id="agent-messages" class="agent-messages" aria-live="polite">
+                        <p id="agent-status" class="text-muted">Agent 后端尚未连接。对话功能将在后续阶段开放。</p>
+                    </div>
+
+                    <form id="agent-composer" class="input-group" method="post">
+                        <label class="sr-only" for="agent-input">输入问题</label>
+                        <input id="agent-input" class="form-control" type="text"
+                            placeholder="Agent 后端尚未连接" disabled>
+                        <span class="input-group-btn">
+                            <button id="agent-send" class="btn btn-default" type="submit" disabled>发送</button>
+                        </span>
+                    </form>
+                </section>
+            </div>
+        </div>
+    </div>
+</main>
+{% endblock %}

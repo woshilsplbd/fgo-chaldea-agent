@@ -11,5 +11,6 @@ urlpatterns = [
     path("api/servants/", include("apps.servants.urls")),
     path("servants/", include((page_urlpatterns, "servants"), namespace="servants")),
     path("news/", include("apps.news.urls")),
+    path("agent/", include("apps.agent.urls")),
     path("admin/", admin.site.urls),
 ]
