@@ -1,8 +1,13 @@
 from django.http import JsonResponse
+from django.shortcuts import render
 
 from .services import MAX_LIMIT
 from .services import fetch_servants
 from .services import parse_positive_int
+
+
+def index(request):
+    return render(request, "servants/index.html", {"active_menu": "products"})
 
 
 def servants_api(request):

@@ -1,0 +1,364 @@
+{% extends "base.html" %}
+{% load static %}
+
+{% block title %}英灵资料{% endblock %}
+
+{% block content %}
+<style>
+    .servant-browser {
+        padding: 34px 0 48px;
+    }
+
+    .servant-browser-header {
+        margin-bottom: 24px;
+        padding: 30px;
+        border-radius: 8px;
+        color: #fff;
+        background:
+            linear-gradient(120deg, rgba(15, 23, 42, .9), rgba(88, 28, 135, .76)),
+            url("{% static 'img/sakurafive.png' %}") center/cover;
+    }
+
+    .servant-browser-header h1 {
+        margin: 0 0 10px;
+        font-size: 32px;
+        font-weight: 700;
+    }
+
+    .servant-browser-header p {
+        max-width: 680px;
+        margin: 0;
+        color: #e9d5ff;
+        line-height: 1.8;
+    }
+
+    .servant-toolbar {
+        margin-bottom: 22px;
+        padding: 18px;
+        border: 1px solid #ddd6fe;
+        border-radius: 6px;
+        background: #f8fafc;
+    }
+
+    .servant-filters {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 8px;
+        margin-bottom: 14px;
+    }
+
+    .servant-filter.is-active {
+        color: #fff;
+        border-color: #6d28d9;
+        background: #7c3aed;
+    }
+
+    .servant-search {
+        display: flex;
+        gap: 8px;
+    }
+
+    .servant-search input {
+        flex: 1;
+        min-width: 0;
+    }
+
+    .servant-state {
+        padding: 18px;
+        border-radius: 6px;
+        color: #475569;
+        background: #f8fafc;
+        text-align: center;
+    }
+
+    .servant-grid {
+        display: grid;
+        grid-template-columns: repeat(auto-fill, minmax(170px, 1fr));
+        gap: 18px;
+    }
+
+    .servant-card {
+        overflow: hidden;
+        border: 1px solid #ddd6fe;
+        border-radius: 6px;
+        background: #fff;
+        box-shadow: 0 8px 20px rgba(30, 41, 59, .1);
+    }
+
+    .servant-card-image {
+        display: block;
+        width: 100%;
+        aspect-ratio: 1 / 1;
+        object-fit: cover;
+        background: #e2e8f0;
+    }
+
+    .servant-card-body {
+        padding: 13px 14px 15px;
+    }
+
+    .servant-card-name {
+        min-height: 42px;
+        margin: 0 0 8px;
+        color: #172554;
+        font-size: 16px;
+        font-weight: 700;
+        line-height: 1.35;
+    }
+
+    .servant-card-meta {
+        margin: 4px 0 0;
+        color: #475569;
+        font-size: 13px;
+    }
+
+    .servant-card-rarity {
+        margin: 0;
+        color: #ca8a04;
+    }
+
+    .servant-pagination {
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        gap: 12px;
+        margin-top: 26px;
+    }
+
+    .servant-page-info {
+        min-width: 110px;
+        color: #475569;
+        text-align: center;
+    }
+
+    @media (max-width: 600px) {
+        .servant-browser-header {
+            padding: 24px;
+        }
+
+        .servant-search {
+            display: block;
+        }
+
+        .servant-search input,
+        .servant-search button {
+            width: 100%;
+            margin-bottom: 8px;
+        }
+    }
+</style>
+
+<main id="servant-browser" class="container servant-browser">
+    <section class="servant-browser-header">
+        <h1>英灵资料</h1>
+        <p>通过 V2 servant API 浏览 Atlas Academy 英灵档案，支持职阶筛选、名称搜索与分页。</p>
+    </section>
+
+    <section class="servant-toolbar" aria-label="英灵筛选">
+        <div id="servant-filters" class="servant-filters">
+            <button type="button" class="btn btn-default servant-filter is-active" data-class-name="All">All</button>
+            <button type="button" class="btn btn-default servant-filter" data-class-name="Saber">Saber</button>
+            <button type="button" class="btn btn-default servant-filter" data-class-name="Archer">Archer</button>
+            <button type="button" class="btn btn-default servant-filter" data-class-name="Lancer">Lancer</button>
+            <button type="button" class="btn btn-default servant-filter" data-class-name="Rider">Rider</button>
+            <button type="button" class="btn btn-default servant-filter" data-class-name="Caster">Caster</button>
+            <button type="button" class="btn btn-default servant-filter" data-class-name="Assassin">Assassin</button>
+            <button type="button" class="btn btn-default servant-filter" data-class-name="Berserker">Berserker</button>
+            <button type="button" class="btn btn-default servant-filter" data-class-name="Extra">Extra</button>
+        </div>
+        <form id="servant-search-form" class="servant-search">
+            <label class="sr-only" for="servant-search-input">搜索英灵名称</label>
+            <input id="servant-search-input" class="form-control" type="search" placeholder="搜索英灵名称">
+            <button type="submit" class="btn btn-primary">搜索</button>
+        </form>
+    </section>
+
+    <div id="servant-state" class="servant-state" role="status" aria-live="polite">正在连接迦勒底资料库...</div>
+    <section id="servant-grid" class="servant-grid" aria-label="英灵结果"></section>
+
+    <nav class="servant-pagination" aria-label="英灵分页">
+        <button id="servant-prev" type="button" class="btn btn-default">上一页</button>
+        <span id="servant-page-info" class="servant-page-info">第 1 / 1 页</span>
+        <button id="servant-next" type="button" class="btn btn-default">下一页</button>
+    </nav>
+</main>
+
+<script>
+    (function () {
+        const fallbackImage = "{% static 'img/sakurafive.png' %}";
+        const grid = document.getElementById('servant-grid');
+        const stateBox = document.getElementById('servant-state');
+        const filters = Array.from(document.querySelectorAll('.servant-filter'));
+        const searchForm = document.getElementById('servant-search-form');
+        const searchInput = document.getElementById('servant-search-input');
+        const previousButton = document.getElementById('servant-prev');
+        const nextButton = document.getElementById('servant-next');
+        const pageInfo = document.getElementById('servant-page-info');
+        const state = { className: 'All', page: 1, limit: 30, search: '', totalPages: 1 };
+
+        function safeImageUrl(value) {
+            try {
+                const url = new URL(String(value || ''), window.location.origin);
+                return url.protocol === 'http:' || url.protocol === 'https:' ? url.href : fallbackImage;
+            } catch (error) {
+                return fallbackImage;
+            }
+        }
+
+        function displayClassName(value) {
+            const names = {
+                moonCancer: 'Moon Cancer',
+                alterEgo: 'Alter Ego',
+                shielder: 'Shielder',
+                ruler: 'Ruler',
+                avenger: 'Avenger',
+                foreigner: 'Foreigner',
+                pretender: 'Pretender',
+                beast: 'Beast'
+            };
+            return names[value] || (value ? String(value).charAt(0).toUpperCase() + String(value).slice(1) : 'Unknown');
+        }
+
+        function setState(message) {
+            stateBox.textContent = message;
+            stateBox.style.display = 'block';
+        }
+
+        function setLoading() {
+            grid.replaceChildren();
+            setState('正在连接迦勒底资料库...');
+            previousButton.disabled = true;
+            nextButton.disabled = true;
+        }
+
+        function setError() {
+            grid.replaceChildren();
+            setState('英灵资料加载失败，请稍后重试。');
+            previousButton.disabled = true;
+            nextButton.disabled = true;
+        }
+
+        function updateControls(data) {
+            state.page = data.page || 1;
+            state.totalPages = data.totalPages || 1;
+            pageInfo.textContent = '第 ' + state.page + ' / ' + state.totalPages + ' 页';
+            previousButton.disabled = !data.hasPrev;
+            nextButton.disabled = !data.hasNext;
+        }
+
+        function createCard(servant) {
+            const card = document.createElement('article');
+            card.className = 'servant-card';
+
+            const image = document.createElement('img');
+            image.className = 'servant-card-image';
+            image.src = safeImageUrl(servant.face || servant.image);
+            image.alt = servant.name || '英灵资料';
+            image.addEventListener('error', function () {
+                image.src = fallbackImage;
+            }, { once: true });
+
+            const body = document.createElement('div');
+            body.className = 'servant-card-body';
+
+            const name = document.createElement('h2');
+            name.className = 'servant-card-name';
+            name.textContent = servant.name || 'Unknown';
+
+            const rarity = document.createElement('p');
+            rarity.className = 'servant-card-rarity';
+            rarity.textContent = servant.rarityStars || (servant.rarity ? '★'.repeat(Number(servant.rarity)) : '未记录');
+
+            const className = document.createElement('p');
+            className.className = 'servant-card-meta';
+            className.textContent = '职阶：' + displayClassName(servant.className || servant.classType);
+
+            const collectionNo = document.createElement('p');
+            collectionNo.className = 'servant-card-meta';
+            collectionNo.textContent = '编号：No.' + (servant.collectionNo || '-');
+
+            body.append(name, rarity, className, collectionNo);
+            card.append(image, body);
+            return card;
+        }
+
+        function renderServants(servants) {
+            grid.replaceChildren();
+            if (!servants.length) {
+                setState('没有找到匹配的英灵资料');
+                return;
+            }
+
+            const fragment = document.createDocumentFragment();
+            servants.forEach(function (servant) {
+                fragment.appendChild(createCard(servant));
+            });
+            grid.appendChild(fragment);
+            stateBox.style.display = 'none';
+        }
+
+        function loadServants() {
+            const params = new URLSearchParams({
+                className: state.className,
+                page: String(state.page),
+                limit: String(state.limit)
+            });
+            if (state.search) {
+                params.set('search', state.search);
+            }
+
+            setLoading();
+            fetch('/api/servants/?' + params.toString())
+                .then(function (response) {
+                    if (!response.ok) {
+                        throw new Error('request failed');
+                    }
+                    return response.json();
+                })
+                .then(function (data) {
+                    if (!data.ok) {
+                        throw new Error('request failed');
+                    }
+                    updateControls(data);
+                    renderServants(Array.isArray(data.results) ? data.results : []);
+                })
+                .catch(setError);
+        }
+
+        filters.forEach(function (button) {
+            button.addEventListener('click', function () {
+                filters.forEach(function (item) {
+                    item.classList.remove('is-active');
+                });
+                button.classList.add('is-active');
+                state.className = button.getAttribute('data-class-name') || 'All';
+                state.page = 1;
+                loadServants();
+            });
+        });
+
+        searchForm.addEventListener('submit', function (event) {
+            event.preventDefault();
+            state.search = searchInput.value.trim();
+            state.page = 1;
+            loadServants();
+        });
+
+        previousButton.addEventListener('click', function () {
+            if (state.page > 1) {
+                state.page -= 1;
+                loadServants();
+            }
+        });
+
+        nextButton.addEventListener('click', function () {
+            if (state.page < state.totalPages) {
+                state.page += 1;
+                loadServants();
+            }
+        });
+
+        loadServants();
+    }());
+</script>
+{% endblock %}

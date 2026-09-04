@@ -15,6 +15,13 @@ class ServantsApiTests(TestCase):
         services._servant_cache.clear()
         services._servant_detail_cache.clear()
 
+    def test_servant_page_uses_namespaced_template(self):
+        response = self.client.get("/servants/")
+
+        self.assertEqual(response.status_code, 200)
+        self.assertTemplateUsed(response, "servants/index.html")
+        self.assertContains(response, 'id="servant-browser"')
+
     @staticmethod
     def atlas_payload():
         return [
