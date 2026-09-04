@@ -2,13 +2,17 @@
 
 - **Title:** 灵基研究室
 - **Source:** `scienceApp/templates/science.html`
-- **Corpus status:** Phase 15C frozen initial corpus; source-preserving cleanup
+- **Authority:** `CURRENT_OFFICIAL` for the supplied high-level mechanics; named Servant records are `STRUCTURED_TOOL`
+- **Currentness:** Limited to the current official evidence package supplied for Phase 15C.6A
+- **Corpus status:** Phase 15C.6A curated corpus; source-preserving cleanup
+
+> **Scope note:** This document keeps current-official high-level mechanics where the evidence package supports them. Exact Servant identity/class/rarity/skill/Noble Phantasm records belong to `STRUCTURED_TOOL`, and unsupported numeric multipliers have been removed.
 
 ## 职阶体系
 
 ### 常规七职阶
 
-Fate/Grand Order 的战斗基础建立在职阶克制之上。以下是构成常规克制循环的七个基础职阶：
+当前官方入门说明支持在编队时考虑职阶克制与被克制。以下职阶名称来自 legacy 页面，作为 archive reference 保留；本文件不提供未经核验的精确伤害倍率：
 
 - Saber（剑士）
 - Archer（弓兵）
@@ -20,7 +24,7 @@ Fate/Grand Order 的战斗基础建立在职阶克制之上。以下是构成常
 
 ### 特殊职阶（Extra Class）
 
-除七基础职阶外，FGO 还实装了多种特殊职阶。它们拥有独立的克制关系或特殊规则：
+legacy 页面还列出以下特殊职阶（Extra Class）名称。它们的具体相性和当前适用范围不在本阶段证据包内：
 
 - Shielder（盾兵）
 - Ruler（裁定者）
@@ -31,83 +35,70 @@ Fate/Grand Order 的战斗基础建立在职阶克制之上。以下是构成常
 - Pretender（伪装者）
 - Beast（兽）
 
-特殊职阶间的克制关系较为复杂，Ruler 被 Avenger 克制、Moon Cancer 被 Alter Ego 克制、Foreigner 与 Alter Ego 互相克制、Pretender 被 Foreigner 克制等。详细数据可查阅游戏内职阶相性表。
+特殊职阶间的克制关系较为复杂；legacy 页面曾列举若干关系，但本 curated corpus 不固化未经当前官方证据支持的精确相性表。详细当前数据应查阅官方游戏说明或后续结构化来源。
 
 ### 克制循环示意
 
 - Saber → 克制 → Lancer → 克制 → Archer → 克制 → Saber
 - Rider → 克制 → Caster → 克制 → Assassin → 克制 → Rider
-- Berserker：攻击时克制所有职阶（1.5 倍），防御时被所有职阶克制（2 倍）
+- 本 legacy 示意包含 Berserker 的全职阶相性说明；具体倍率已移除，避免把未经核验的数字作为当前机制。
 
 ## 宝具类型
 
 ### 单体宝具
 
-对敌方单体造成大量伤害。适用于高难本、BOSS 战。典型从者：红阎魔（单体 Saber）、斯卡哈（单体 Lancer）。
+对敌方单体造成大量伤害；legacy 页面将其与高难本、BOSS 战联系起来。具体 Servant 示例属于 `STRUCTURED_TOOL`，不在本段固化。
 
 ### 全体宝具
 
-对敌方全体造成伤害。适用于周回、清杂兵。典型从者：摩根（全体 Berserker）、妖兰（全体 Lancer）。
+对敌方全体造成伤害；legacy 页面将其与周回、清杂兵联系起来。具体 Servant 示例属于 `STRUCTURED_TOOL`，不在本段固化。
 
 ### 辅助宝具
 
-不直接攻击而是提供 Buff / 回复 / 复活等效果。典型从者：玛修·基列莱特（全体无敌）、阿尔托莉雅·Caster（NP 充能）。
+不直接攻击而是提供 Buff / 回复 / 复活等效果。具体 Servant 示例属于 `STRUCTURED_TOOL`，不在本段固化。
 
 ### 宝具等级与强化
 
-重复获得同一从者可提升宝具等级（最高 Lv.5），每提升一级宝具伤害倍率大幅增加。宝具可通过「宝具强化关卡」或「从者强化关卡」获得性能提升或追加效果。部分从者拥有「宝具本」——通关后宝具倍率或效果会获得质的飞跃。
+当前官方强化说明支持：重复获得同一从者可提升宝具性能，最多五个宝具阶段；宝具也可以通过强化内容获得性能提升。未经当前官方证据支持的“倍率大幅增加”及具体强化关卡表述不作为本基线。
 
 ## 指令卡系统
 
 ### 三种指令卡详解
 
-每名从者拥有五张指令卡，由 Buster / Arts / Quick 三种类型按固定配比组成。战斗中每回合随机抽选五张卡，从者每回合最多可行动三次。
+当前官方战斗说明支持三种指令卡及其基本关联：Quick 与暴击星/暴击行为相关，Arts 与 NP 获取相关，Buster 与较高伤害相关。官方说明还涵盖 1st Bonus、Quick Chain、Arts Chain、Buster Chain、Brave Chain / Extra Attack 和 Mighty Chain。
 
 #### Buster 红卡
 
-- 伤害倍率最高
-- NP 获取最低
-- 暴击星产出一般
-- 红卡 Chain 额外 +20% 伤害
+官方说明将 Buster 与较高伤害相关联，并说明 Buster Chain；本阶段不固化“最高/最低”排名或未经批准的数值奖励。
 
 #### Arts 蓝卡
 
-- 伤害倍率中等
-- NP 获取最高
-- 暴击星产出低
-- 蓝卡 Chain 全队 +20% NP
+官方说明将 Arts 与 NP 获取相关联，并说明 Arts Chain；本阶段不固化未经批准的数值奖励。
 
 #### Quick 绿卡
 
-- 伤害倍率最低
-- NP 获取中等
-- 暴击星产出最高
-- 绿卡 Chain +10 暴击星
+官方说明将 Quick 与暴击星/暴击行为相关联，并说明 Quick Chain；本阶段不固化“最高/最低”排名或未经批准的数值奖励。
+
+### Mighty Chain
+
+Mighty Chain 使用一张 Quick、一张 Arts 和一张 Buster，并给予相应的第一张卡加成效果。
 
 ## 技能强化
 
 ### 技能等级
 
-每个从者拥有三个主动技能（部分从者有追加技能），技能等级从 Lv.1 到 Lv.10 消耗逐渐增加。Lv.7 以上需要「技能石」与「传承结晶」。
-
-技能升级优先级建议：
-
-- 充能技能 > 增伤技能 > 生存技能
-- 核心技能优先 10 级，次要技能 6 级即可
-- 传承结晶极其稀缺，请谨慎使用
+当前官方强化说明支持技能强化可以提升性能，且某些技能等级能够缩短充能时间。具体等级、素材门槛和技能升级顺序不在本阶段官方证据范围内，因此不提供统一的“优先级”建议。
 
 ### 追加技能
 
-使用从者币可以解锁追加技能（Append Skill），每个从者最多三个：① 初始 NP 提升，② 特定职阶特攻，③ 暴击星集中度提升。
-
-追加技能 2（对某一职阶的攻击适性）对周回有显著提升，建议优先解锁输出从者的追加技能 2。
+legacy 页面曾提到追加技能（Append Skill）及其周回建议；具体技能数量、效果和优先级属于版本敏感的 Servant/系统数据，本 curated corpus 不将其作为当前官方基线。
 
 ## 灵基再临
 
 ### 再临阶段
 
-灵基再临（Ascension）是从者成长的核心环节。每突破一次等级上限 +10，总计四次再临。每次再临不仅提升战力，还会解锁新的卡面立绘与战斗模型。第四阶段（最终再临）的立绘通常最为华丽。
+当前官方强化说明支持灵基再临提高从者等级上限，适用时最多可进行四个阶段。legacy 页面关于每阶段固定 +10、卡面立绘和最终阶段效果的描述未纳入当前基线。
 
 ### 消耗素材
 
-灵基再临需要消耗各职阶对应的「棋子」与「辉石」，以及特定数量的稀有素材。高星从者需要的素材更加稀有。活动商店是获取棋子和辉石的主要途径。
+legacy 页面还列举棋子、辉石和稀有素材等消耗及活动商店来源；这些资源细节可能随版本或活动变化，保留为 `ARCHIVE_EDITORIAL` 线索而非当前官方优先级。

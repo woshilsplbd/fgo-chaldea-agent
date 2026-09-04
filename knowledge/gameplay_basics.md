@@ -2,24 +2,28 @@
 
 - **Title:** 新手入门
 - **Source:** `serviceApp/templates/download.html`
-- **Corpus status:** Phase 15C frozen initial corpus; source-preserving cleanup
+- **Authority:** `CURRENT_OFFICIAL` for the verified basic flow and strengthening concepts; legacy advice is labeled `ARCHIVE_EDITORIAL`
+- **Currentness:** Current mechanics are limited to the supplied official evidence package; unsupported rates and universal targets are excluded
+- **Corpus status:** Phase 15C.6A curated corpus; source-preserving cleanup
+
+> **Scope note:** This document combines a small current-official foundation with clearly marked archive notes retained from the legacy page. It is not a complete current guide or a source for exact Servant records.
 
 ## 欢迎来到迦勒底，新人御主
 
 ### 游戏基础
 
-Fate/Grand Order 是一款回合制指令卡战斗 RPG。玩家作为御主，率领最多六名从者组成的队伍，在七个章节的主线剧情中探索特异点、修复人理。游戏的核心循环为：通关自由本获取素材 → 强化从者灵基 → 挑战更高难度关卡。
+当前官方 Starter Guide 对基础流程的描述是：消耗 AP 挑战任务，使用召唤的从者进行战斗；胜利后解锁更多地图或任务，并继续推进任务。该概念性流程是本节的 `CURRENT_OFFICIAL` 内容。
+
+原 legacy 页面还将游戏概括为回合制指令卡战斗 RPG，并提到队伍人数和主线章节数量；这些具体数量未纳入当前官方证据范围，因此不作为当前基线。
 
 ### 从者获取
 
-从者主要通过「圣晶石召唤」（卡池抽卡）获得。每个卡池分为「剧情池」（常驻）和「限定池」（期间限定）。五星从者基础概率为 1%，此外还有「友情点召唤」可获取一至三星从者与概念礼装。
-
-小贴士：限定池的从者不会进入剧情池，指定从者出现时请务必确认卡池信息。
+legacy 页面曾介绍圣晶石召唤、剧情池、限定池和友情点召唤。这些内容保留为 `ARCHIVE_EDITORIAL` 线索；具体概率、卡池行为和“不会进入”等绝对表述已从当前基线移除，需另行核验后才能作为现行指南。
 
 ### 从者养成
 
-从者养成分为：升级（喂种火提升等级）、灵基再临（消耗素材突破等级上限并改变卡面）、技能强化（消耗素材与 QP 提升技能等级）、从者币（用于开放追加技能与等级上限）。每个从者的最终养成目标为「120 级 + 技能 10/10/10 + 追加技能全满」。
+当前官方强化说明支持以下基础概念：使用经验素材提升从者等级；灵基再临提高等级上限，适用时最多可进行四个阶段；技能强化可以提升性能；同一从者的重复获得可将宝具性能提升至最多五个宝具阶段；概念礼装也可以升级或强化。这里不规定统一的最终等级、技能顺序或“全满”目标。
 
 ### 指令卡系统
 
-战斗界面下方有五张指令卡，分为三种类型：Buster（红卡，高伤害）、Arts（蓝卡，增加 NP）、Quick（绿卡，产星）。选择三张卡组成 Chain 可触发额外效果：三张同色卡触发 Braver/Buster/Arts/Quick Chain，三张不同从者的卡触发 Team Chain。
+当前官方战斗说明支持三种指令卡及其基本关联：Quick 与暴击星/暴击行为相关，Arts 与 NP 获取相关，Buster 与较高伤害相关；说明还涵盖 1st Bonus、Quick Chain、Arts Chain、Buster Chain、Brave Chain / Extra Attack 和 Mighty Chain。Mighty Chain 使用一张 Quick、一张 Arts 和一张 Buster，并给予相应的第一张卡加成效果。未纳入未经批准的精确倍率。
