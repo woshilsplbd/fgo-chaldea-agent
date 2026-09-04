@@ -44,6 +44,10 @@ _servant_cache = {}
 _servant_detail_cache = {}
 
 
+class AtlasNotFoundError(Exception):
+    """The upstream service has no servant for the requested identifier."""
+
+
 def display_class_name(class_name):
     names = {
         "moonCancer": "Moon Cancer",
@@ -89,7 +93,12 @@ def request_atlas(class_name):
 def request_atlas_detail(servant_id):
     detail_url = ATLAS_SERVANT_DETAIL_URL.format(servant_id)
     response = requests.get(detail_url, params={"lore": "true"}, timeout=8)
-    response.raise_for_status()
+    try:
+        response.raise_for_status()
+    except requests.HTTPError as exc:
+        if response.status_code == 404:
+            raise AtlasNotFoundError from exc
+        raise
     return response.json()
 
 

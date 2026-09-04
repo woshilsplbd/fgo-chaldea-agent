@@ -22,6 +22,76 @@ class ServantsApiTests(TestCase):
         self.assertTemplateUsed(response, "servants/index.html")
         self.assertContains(response, 'id="servant-browser"')
 
+    @patch("apps.servants.views.services.fetch_atlas_servant_detail")
+    def test_detail_success_returns_normalized_servant(self, fetch_detail):
+        fetch_detail.return_value = {
+            "id": 42,
+            "collectionNo": 42,
+            "name": "Mash Kyrielight",
+            "className": "shielder",
+            "rarity": 4,
+            "extraAssets": {
+                "faces": {"ascension": {"stage1": "https://example.test/face.png"}},
+                "charaGraph": {
+                    "ascension": {"stage4": "https://example.test/large.png"}
+                },
+            },
+            "profile": {"comments": [{"comment": "A dependable Demi-Servant."}]},
+            "skills": [
+                {
+                    "name": "Castle of Snow",
+                    "rank": "EX",
+                    "icon": "https://example.test/skill.png",
+                    "detail": "Protective skill",
+                }
+            ],
+            "noblePhantasms": [
+                {
+                    "name": "Lord Camelot",
+                    "rank": "B+++",
+                    "card": "Arts",
+                    "detail": "A mighty shield",
+                }
+            ],
+        }
+
+        response = self.client.get("/api/servants/42/")
+        data = response.json()
+
+        self.assertEqual(response.status_code, 200)
+        self.assertTrue(data["ok"])
+        self.assertEqual(data["servant"]["id"], 42)
+        self.assertEqual(data["servant"]["collectionNo"], 42)
+        self.assertEqual(data["servant"]["displayClassName"], "Shielder")
+        self.assertEqual(data["servant"]["description"], "A dependable Demi-Servant.")
+        self.assertEqual(data["servant"]["skills"][0]["name"], "Castle of Snow")
+        self.assertEqual(data["servant"]["noblePhantasms"][0]["name"], "Lord Camelot")
+        self.assertEqual(data["servant"]["largeImage"], "https://example.test/large.png")
+
+    @patch("apps.servants.views.services.fetch_atlas_servant_detail")
+    def test_detail_not_found_returns_404(self, fetch_detail):
+        fetch_detail.return_value = {}
+
+        response = self.client.get("/api/servants/999999/")
+        data = response.json()
+
+        self.assertEqual(response.status_code, 404)
+        self.assertFalse(data["ok"])
+        self.assertIn("message", data)
+
+    @patch("apps.servants.views.services.fetch_atlas_servant_detail")
+    def test_detail_upstream_failure_returns_controlled_502(self, fetch_detail):
+        fetch_detail.side_effect = requests.RequestException("private upstream detail")
+
+        response = self.client.get("/api/servants/42/")
+        body = response.content.decode("utf-8")
+
+        self.assertEqual(response.status_code, 502)
+        self.assertFalse(response.json()["ok"])
+        self.assertNotIn("private upstream detail", body)
+        self.assertNotIn("Traceback", body)
+        self.assertNotIn("RequestException", body)
+
     @staticmethod
     def atlas_payload():
         return [
