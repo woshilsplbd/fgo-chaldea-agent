@@ -1,0 +1,312 @@
+/*-------------头部------------*/
+/*头部边距*/
+.top {
+    margin-top: 10px;
+}
+
+/*电话图标*/
+.phone {
+    color: #666;
+    float: right;
+}
+
+/*邮箱图标*/
+.mail {
+    color: #666;
+    float: right;
+}
+
+/*取消小图标的下划线*/
+.ant:link {
+    text-decoration: none;
+}
+
+.ant:visited {
+    text-decoration: none;
+}
+
+.ant:hover {
+    text-decoration: none;
+}
+
+.ant:active {
+    text-decoration: none;
+}
+
+/*-------------导航栏 (FGO Purple Theme)------------*/
+/* 导航条默认属性设置 */
+.navbar-default {
+    margin-bottom: 0px;
+    border: 0px;
+    background: linear-gradient(135deg, #1e1b4b, #2e1065);
+    margin-top: 30px;
+    border-radius: 0;
+    box-shadow: 0 4px 20px rgba(30, 27, 75, .5);
+}
+
+/* 导航栏容器 - 使用Flexbox水平排列 */
+.navbar-default .navbar-nav {
+    display: flex;
+    flex-wrap: nowrap;
+    width: 100%;
+    margin: 0;
+}
+
+.navbar-default .navbar-nav > li {
+    flex: 1 1 auto;
+    text-align: center;
+    white-space: nowrap;
+}
+
+/* 一级菜单链接样式 */
+.navbar-default .navbar-nav > li > a {
+    padding: 12px 16px;
+    color: #c4b5fd;
+    font-size: 14px;
+    font-weight: 600;
+    letter-spacing: 1px;
+    transition: all .18s ease;
+    border-bottom: 2px solid transparent;
+}
+
+/* 一级菜单鼠标移过 */
+.navbar-default .navbar-nav > li > a:hover,
+.navbar-default .navbar-nav > li > a:focus {
+    color: #fff;
+    background: rgba(124, 58, 237, .25);
+    border-bottom-color: #a78bfa;
+}
+
+/* 导航栏栏目激活时 */
+.navbar-default .navbar-nav > .active > a,
+.navbar-default .navbar-nav > .active > a:hover,
+.navbar-default .navbar-nav > .active > a:focus {
+    color: #fff;
+    background: rgba(124, 58, 237, .35);
+    border-bottom: 2px solid #a78bfa;
+}
+
+/* 一级菜单下拉展开时 */
+.navbar-default .navbar-nav > li.open > a,
+.navbar-default .navbar-nav > li.open > a.on {
+    color: #fff;
+    background: rgba(124, 58, 237, .35);
+    border-bottom-color: #a78bfa;
+}
+
+/* 下拉菜单 */
+.dropdown-menu {
+    padding: 4px 0;
+    border: 1px solid rgba(168, 85, 247, .3);
+    border-radius: 0 0 6px 6px;
+    background: linear-gradient(180deg, #1e1b4b, #2e1065);
+    box-shadow: 0 8px 24px rgba(30, 27, 75, .5);
+}
+
+/* 二级菜单项 */
+.dropdown-menu li a {
+    padding: 10px 24px;
+    color: #c4b5fd;
+    font-size: 13px;
+    text-align: center;
+    transition: all .14s ease;
+}
+
+/* 二级菜单鼠标移过 */
+.navbar-default .navbar-nav li ul a:hover,
+.navbar-default .navbar-nav li.active ul a:hover {
+    color: #fff;
+    background: rgba(124, 58, 237, .3);
+}
+
+/* 导航栏与横幅的分割线 - FGO紫色主题 */
+.line {
+    height: 3px;
+    width: 100%;
+    background: linear-gradient(90deg, #7c3aed, #a78bfa, #7c3aed);
+}
+
+/* 移动端导航折叠按钮 */
+.navbar-toggle {
+    border: 1px solid rgba(196, 181, 253, .4) !important;
+    background: rgba(15, 23, 42, .4) !important;
+    transition: all .18s ease;
+}
+
+.navbar-toggle:hover,
+.navbar-toggle:focus {
+    background: rgba(124, 58, 237, .3) !important;
+}
+
+.navbar-toggle span {
+    color: #c4b5fd !important;
+    font-size: 13px;
+    font-weight: 600;
+}
+
+.navbar-toggle .icon-bar {
+    background-color: #c4b5fd !important;
+}
+
+/* 移动端响应式 - 导航改为折叠 */
+@media (max-width: 767px) {
+    .navbar-default .navbar-nav {
+        display: block;
+        width: 100%;
+    }
+
+    .navbar-default .navbar-nav > li {
+        display: block;
+        width: 100%;
+        text-align: left;
+    }
+
+    .navbar-default .navbar-nav > li > a {
+        padding: 10px 16px;
+        border-bottom: none;
+    }
+
+    .navbar-default .navbar-nav > .active > a,
+    .navbar-default .navbar-nav > .active > a:hover,
+    .navbar-default .navbar-nav > .active > a:focus {
+        border-bottom: none;
+    }
+
+    .navbar-default .navbar-nav > li.open > a,
+    .navbar-default .navbar-nav > li.open > a.on {
+        border-bottom: none;
+    }
+
+    .dropdown-menu {
+        border-radius: 0;
+        border-left: 2px solid rgba(168, 85, 247, .3);
+        margin: 0 12px;
+        background: rgba(15, 23, 42, .6);
+    }
+}
+
+/*-------------主体------------*/
+/* 主题标题 */
+.model-details-title{
+	padding:15px 0px;
+	font-size:18px;
+	border-bottom:1px #005197 solid; /* 底部添加蓝色边框 */
+	color:#005197;
+	margin-bottom:10px;
+	margin-top:10px;
+}
+/* 文字段落 */
+.model-details p{
+	line-height:30px;
+	text-indent:2em;
+	text-align:justify;
+	text-justify:inter-ideograph;
+}
+/* 主体图像 */
+.model-details img{
+	margin:0px auto;
+}
+
+/* 侧边导航栏 */
+.row-3{
+	margin-top:30px; /* 设置顶部边距 */
+}
+
+/*侧边导航栏标题样式*/
+.model-title {
+	text-align: center;
+	color: #fff;
+	font-size: 22px;
+	padding: 15px 0px;
+	background: #005197;
+	margin-top: 25px;
+}
+/*侧边导航栏列表项样式*/
+.model-list li{
+	text-align:center;
+	background-color:#f6f6f6;
+	font-size:16px;
+}
+/*侧边导航栏列表项链接样式*/
+.model-list li a{
+	color:#545353;
+}
+/*侧边导航栏列表项链接激活样式*/
+.model-list li a:hover{
+	text-decoration:none;
+	color:#005197;
+}
+
+/*侧边导航栏激活样式*/
+.model-list li.active{
+	text-align:center;
+	background-color:#f6f6f6;
+	font-size:16px;
+	border-color: #ddd;
+}
+/*侧边导航栏激活状态下鼠标移过时样式*/
+.model-list li.active:hover{
+	text-align:center;
+	background-color:#f6f6f6;
+	font-size:16px;
+	border-color: #ddd;
+}
+/*侧边导航栏激活状态时链接样式*/
+.model-list li.active a{
+	color:#005197;
+}
+
+/*-------------页脚------------*/
+.web-footer{
+	width:100%;        /* 占满整个浏览器宽度 */
+	margin-top:30px;   /* 设置与上边缘距离 */
+}
+
+#map-footer{
+	background-color:#3A3A3A;        /* 对整个站点地图设置背景色灰色 */
+}
+#map-footer dl{
+	text-align:center;               /* 站点链接文字对齐 */
+	margin-top:40px;                 /* 设置表格与上边缘边距 */
+}
+#map-footer dt{
+	padding:3px;                     /* 表格标题内边距为3像素 */
+	color:#fff;                      /* 表格标题颜色为白色 */
+}
+#map-footer dd{
+	padding:3px;                     /* 表格内容内边距为3像素 */
+}
+
+/* 二维码广告段落 */
+#map-footer p{
+	margin-top:20px;
+	margin-bottom:10px;
+	color:#fff;
+	font-size:16px;
+}
+#map-footer a{
+	color:#A6A6A6;                   /* 站点链接文字颜色设置 */
+	font-size:13px;                  /* 站点链接文字大小 设置 */
+}
+#map-footer a:hover{
+	color:#fff;
+	text-decoration:none;             /* 去除站点链接鼠标移过时出现的下划线 */
+}
+#wx{
+	text-align:center;                /* 二维码居中对齐 */
+}
+.qrimg{
+	max-width: 170px;                 /* 二维码最大宽度为170像素 */
+}
+
+/*-------------尾部版权------------*/
+#patent-footer{
+	text-align:center;
+	background-color:#3A3A3A;
+}
+#patent-footer p{
+	margin-top:10px;
+	padding-right:80px;
+	color:#8d8d8d;
+	font-size:11px;
+}
