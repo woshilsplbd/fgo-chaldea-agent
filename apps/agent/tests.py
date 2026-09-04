@@ -1,7 +1,7 @@
 import json
 from pathlib import Path
 from tempfile import TemporaryDirectory
-from unittest.mock import patch
+from unittest.mock import call, patch
 
 import requests
 from django.core.management import call_command
@@ -373,6 +373,7 @@ class AgentEvaluationCommandTests(TestCase):
 
         self.assertEqual([item[1] for item in calls], [None, None, None, "conv-a", None])
         self.assertFalse(payload["retrieval_used"])
+        self.assertIsNone(payload["experiment_label"])
         self.assertEqual(payload["results"][1]["expected_facts"], ["fact-2"])
         self.assertEqual(payload["results"][1]["source"], "source-2")
         self.assertEqual(payload["results"][0]["status"], "success")
@@ -429,6 +430,150 @@ class AgentEvaluationCommandTests(TestCase):
 
             with self.assertRaisesRegex(CommandError, "authority_scope"):
                 call_command("evaluate_agent", cases=str(cases), output=str(output))
+
+    @override_settings(DIFY_API_BASE_URL="https://dify.example/v1", DIFY_API_KEY="dummy")
+    @patch("apps.agent.management.commands.evaluate_agent.time.sleep")
+    @patch("apps.agent.management.commands.evaluate_agent.services.chat")
+    def test_default_delay_is_zero(self, chat, sleep):
+        chat.return_value = {
+            "answer": "safe",
+            "conversation_id": None,
+            "message_id": None,
+        }
+        with TemporaryDirectory() as directory:
+            cases = self.write_cases(
+                directory,
+                cases=[
+                    {
+                        "id": "one",
+                        "category": "knowledge_hit",
+                        "question": "one",
+                        "source": "source",
+                        "expected_facts": [],
+                        "forbidden_claims": [],
+                    },
+                    {
+                        "id": "two",
+                        "category": "knowledge_hit",
+                        "question": "two",
+                        "source": "source",
+                        "expected_facts": [],
+                        "forbidden_claims": [],
+                    },
+                ],
+            )
+            output = Path(directory) / "results.json"
+            call_command("evaluate_agent", cases=str(cases), output=str(output))
+
+        sleep.assert_not_called()
+
+    @override_settings(DIFY_API_BASE_URL="https://dify.example/v1", DIFY_API_KEY="dummy")
+    @patch("apps.agent.management.commands.evaluate_agent.time.sleep")
+    @patch("apps.agent.management.commands.evaluate_agent.services.chat")
+    def test_custom_delay_sleeps_between_requests_not_after_final(self, chat, sleep):
+        chat.return_value = {
+            "answer": "safe",
+            "conversation_id": None,
+            "message_id": None,
+        }
+        with TemporaryDirectory() as directory:
+            cases = self.write_cases(
+                directory,
+                cases=[
+                    {
+                        "id": "one",
+                        "category": "knowledge_hit",
+                        "question": "one",
+                        "source": "source",
+                        "expected_facts": [],
+                        "forbidden_claims": [],
+                    },
+                    {
+                        "id": "two",
+                        "category": "knowledge_hit",
+                        "question": "two",
+                        "source": "source",
+                        "expected_facts": [],
+                        "forbidden_claims": [],
+                    },
+                    {
+                        "id": "three",
+                        "category": "knowledge_hit",
+                        "question": "three",
+                        "source": "source",
+                        "expected_facts": [],
+                        "forbidden_claims": [],
+                    },
+                ],
+            )
+            output = Path(directory) / "results.json"
+            call_command(
+                "evaluate_agent",
+                cases=str(cases),
+                output=str(output),
+                delay_seconds=2.5,
+            )
+
+        self.assertEqual(sleep.call_args_list, [call(2.5), call(2.5)])
+
+    @override_settings(DIFY_API_BASE_URL="https://dify.example/v1", DIFY_API_KEY="dummy")
+    @patch("apps.agent.management.commands.evaluate_agent.services.chat")
+    def test_retrieval_flag_and_experiment_label_are_recorded(self, chat):
+        chat.return_value = {
+            "answer": "safe",
+            "conversation_id": None,
+            "message_id": None,
+        }
+        with TemporaryDirectory() as directory:
+            cases = self.write_cases(directory, cases=[
+                {
+                    "id": "post-rag",
+                    "category": "knowledge_hit",
+                    "question": "question",
+                    "source": "source",
+                    "expected_facts": [],
+                    "forbidden_claims": [],
+                }
+            ])
+            output = Path(directory) / "results.json"
+            call_command(
+                "evaluate_agent",
+                cases=str(cases),
+                output=str(output),
+                retrieval_used=True,
+                experiment_label="post-rag-controlled",
+            )
+            payload = json.loads(output.read_text(encoding="utf-8"))
+
+        self.assertTrue(payload["retrieval_used"])
+        self.assertEqual(payload["experiment_label"], "post-rag-controlled")
+        self.assertEqual(payload["results"][0]["status"], "success")
+
+    @override_settings(DIFY_API_BASE_URL="https://dify.example/v1", DIFY_API_KEY="dummy")
+    @patch("apps.agent.management.commands.evaluate_agent.services.chat")
+    def test_negative_delay_is_rejected(self, chat):
+        with TemporaryDirectory() as directory:
+            cases = self.write_cases(directory, cases=[
+                {
+                    "id": "negative-delay",
+                    "category": "knowledge_hit",
+                    "question": "question",
+                    "source": "source",
+                    "expected_facts": [],
+                    "forbidden_claims": [],
+                }
+            ])
+            output = Path(directory) / "results.json"
+
+            with self.assertRaisesRegex(CommandError, "delay-seconds"):
+                call_command(
+                    "evaluate_agent",
+                    cases=str(cases),
+                    output=str(output),
+                    delay_seconds=-1,
+                )
+
+        chat.assert_not_called()
 
     @override_settings(DIFY_API_BASE_URL="https://dify.example/v1", DIFY_API_KEY="dummy")
     @patch("apps.agent.management.commands.evaluate_agent.services.chat")

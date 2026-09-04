@@ -22,7 +22,7 @@ The runner records raw answers and metadata only. Human review can later assign:
 - `1` — partially correct or incomplete;
 - `0` — incorrect, unsupported, or fabricated.
 
-Also record `hallucination` (`true`/`false`) and `retrieval_used` (`true`/`false`). For the pre-RAG baseline, `retrieval_used` is conceptually `false` because no Knowledge Retrieval node is active yet. A clear limitation response for an out-of-scope case is a successful grounded behavior; a confident invented answer is a failure.
+Also record `hallucination` (`true`/`false`) and `retrieval_used` (`true`/`false`). The retrieval flag is experiment metadata supplied by the operator, not an automatic statement about remote workflow structure. A clear limitation response for an out-of-scope case is a successful grounded behavior; a confident invented answer is a failure.
 
 ## Running the raw baseline
 
@@ -35,3 +35,32 @@ From `v2/`, using the project environment:
 ```
 
 The output path is explicit and should remain outside Git. Existing output is never overwritten unless `--overwrite` is supplied. The command calls only `apps.agent.services.chat()`; it does not call Dify directly and does not write credentials, headers, raw provider payloads, or automatic scores.
+
+## Experiment metadata and pacing
+
+The evaluator does not inspect Dify or infer retrieval state. These are operator-supplied experiment metadata fields:
+
+- **Pre-RAG:** omit `--retrieval-used` (it defaults to `false`).
+- **Post-RAG:** include `--retrieval-used` to record `true`.
+- `--experiment-label` optionally records a human-readable run label.
+- `--delay-seconds` accepts a non-negative float and waits between evaluation requests; it defaults to `0` and performs no automatic retry.
+
+Example curated PRE-RAG run:
+
+```text
+..\.venv\Scripts\python.exe manage.py evaluate_agent \
+  --cases evals/rag_cases_curated_v1.json \
+  --output D:\pyweb\chaldea-reports\curated-v1-pre-rag.json \
+  --experiment-label curated-v1-pre-rag
+```
+
+Example curated POST-RAG run with explicit pacing:
+
+```text
+..\.venv\Scripts\python.exe manage.py evaluate_agent \
+  --cases evals/rag_cases_curated_v1.json \
+  --output D:\pyweb\chaldea-reports\curated-v1-post-rag.json \
+  --retrieval-used \
+  --experiment-label curated-v1-post-rag \
+  --delay-seconds 7
+```

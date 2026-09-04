@@ -143,12 +143,32 @@ class Command(BaseCommand):
         parser.add_argument("--cases", required=True, help="Path to evaluation cases JSON")
         parser.add_argument("--output", required=True, help="Path for the baseline output JSON")
         parser.add_argument(
+            "--retrieval-used",
+            action="store_true",
+            help="Record that Knowledge Retrieval was enabled for this run",
+        )
+        parser.add_argument(
+            "--experiment-label",
+            default=None,
+            help="Optional operator-supplied label for this evaluation run",
+        )
+        parser.add_argument(
+            "--delay-seconds",
+            type=float,
+            default=0.0,
+            help="Seconds to wait between evaluation requests (default: 0)",
+        )
+        parser.add_argument(
             "--overwrite",
             action="store_true",
             help="Allow replacing an existing output file",
         )
 
     def handle(self, *args, **options):
+        delay_seconds = options["delay_seconds"]
+        if delay_seconds < 0:
+            raise CommandError("delay-seconds must be greater than or equal to 0")
+
         cases_path = Path(options["cases"])
         output_path = Path(options["output"])
         if not cases_path.is_file():
@@ -170,7 +190,9 @@ class Command(BaseCommand):
         group_conversations = {}
         results = []
 
-        for case in cases:
+        for index, case in enumerate(cases):
+            if index and delay_seconds:
+                time.sleep(delay_seconds)
             group = case.get("conversation_group")
             conversation_id = group_conversations.get(group) if group else None
             started = time.perf_counter()
@@ -230,7 +252,8 @@ class Command(BaseCommand):
 
         output = {
             "version": 1,
-            "retrieval_used": False,
+            "retrieval_used": bool(options["retrieval_used"]),
+            "experiment_label": options.get("experiment_label"),
             "cases_path": str(cases_path),
             "results": results,
         }
