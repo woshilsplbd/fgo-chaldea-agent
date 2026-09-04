@@ -26,7 +26,25 @@ def _env_bool(name, default=False):
     )
 
 
+def _env_positive_float(name, default):
+    value = os.environ.get(name)
+    if value is None:
+        return default
+
+    try:
+        parsed = float(value)
+    except (TypeError, ValueError):
+        return default
+
+    return parsed if parsed > 0 else default
+
+
 DEBUG = _env_bool("DJANGO_DEBUG", default=True)
+
+# Dify configuration is optional until a provider is deliberately configured.
+DIFY_API_BASE_URL = os.environ.get("DIFY_API_BASE_URL", "").strip()
+DIFY_API_KEY = os.environ.get("DIFY_API_KEY", "").strip()
+DIFY_TIMEOUT_SECONDS = _env_positive_float("DIFY_TIMEOUT_SECONDS", 30.0)
 
 # This fallback is development-only. Production must provide
 # DJANGO_SECRET_KEY explicitly.
