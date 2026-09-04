@@ -1,12 +1,16 @@
-# Agent RAG evaluation set
+# Agent RAG evaluation sets
 
-This directory contains the version-controlled evaluation definitions for the first Chaldea Agent knowledge-retrieval experiment. The cases describe what to check; they do not contain live model answers.
+This directory contains version-controlled evaluation definitions for the Chaldea Agent knowledge-retrieval experiments. The cases describe what to check; they do not contain live model answers.
+
+`rag_cases.json` is the immutable exploratory evaluation set created for the pre-curation legacy-corpus baseline. `rag_cases_curated_v1.json` is the authority-aware set for Curated Corpus v1 after Phase 15C.6A. The original set and the external baseline output remain unchanged.
+
+For a controlled PRE-RAG versus POST-RAG comparison, use `rag_cases_curated_v1.json` for both runs and keep the generation model, prompt, model parameters, and case order constant. Knowledge Retrieval should be the principal experimental change. Do not overwrite `D:\pyweb\chaldea-reports\phase15b-rag-baseline.json`; it belongs to the exploratory pre-curation experiment and is not the direct comparison baseline for Curated Corpus v1.
 
 The initial corpus targets authored, unstructured FGO explanations (mechanics, beginner guidance, strategy, and reviewed lore). Structured servant facts such as IDs, classes, rarities, skills, and Noble Phantasms are intentionally marked `out_of_scope_structured_fact` because they belong to the future Tool Calling path backed by the V2 servant service/API, not ordinary RAG retrieval.
 
 ## Case format and context
 
-Each case in `rag_cases.json` includes an ID, category, question, source reference, concise expected factual checkpoints, and relevant forbidden claims. Factual checkpoints originate from the repository pages identified in the Phase 15A assessment; they are not intended to be essay answers.
+Each case in `rag_cases.json` includes an ID, category, question, source reference, concise expected factual checkpoints, and relevant forbidden claims. `rag_cases_curated_v1.json` adds `authority_scope` and `expected_scope_behavior` so reviewers can check whether an answer preserves current-official, historical, editorial, or Tool Calling boundaries. Factual checkpoints originate from the curated repository documents; they are not intended to be essay answers.
 
 Cases without `conversation_group` are independent. The evaluation runner starts each one with `conversation_id = None`, so one case cannot influence another. Cases in the same `conversation_group` share only the provider-returned conversation ID: the first turn starts fresh, and later turns reuse that group’s ID. Groups never share IDs.
 

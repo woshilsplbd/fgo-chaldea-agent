@@ -1,0 +1,269 @@
+[
+  {
+    "id": "curated-001",
+    "category": "knowledge_hit",
+    "authority_scope": "CURRENT_OFFICIAL",
+    "question": "What basic gameplay flow is described by the current official guidance?",
+    "source": "gameplay_basics.md — 游戏基础",
+    "expected_facts": [
+      "Consume AP to challenge quests.",
+      "Fight using summoned Servants.",
+      "Winning unlocks further maps or quests and progression continues through quests."
+    ],
+    "forbidden_claims": [
+      "Fixed party-size or chapter-count claims not present in the current evidence.",
+      "Universal progression guarantees."
+    ],
+    "expected_scope_behavior": "Answer as current official high-level guidance without adding unsupported quantities.",
+    "notes": "Current-official onboarding case."
+  },
+  {
+    "id": "curated-002",
+    "category": "knowledge_hit",
+    "authority_scope": "CURRENT_OFFICIAL",
+    "question": "What formation consideration does the current official guidance support?",
+    "source": "combat_mechanics.md — 职阶体系",
+    "expected_facts": [
+      "Party formation should consider class advantage and disadvantage."
+    ],
+    "forbidden_claims": [
+      "Unverified exact class-damage multipliers.",
+      "Current servant rankings."
+    ],
+    "expected_scope_behavior": "Keep the answer at the supported class-advantage concept and avoid exact multipliers.",
+    "notes": "The document's legacy class lists are not a current numerical matchup table."
+  },
+  {
+    "id": "curated-003",
+    "category": "knowledge_hit",
+    "authority_scope": "CURRENT_OFFICIAL",
+    "question": "What do the current strengthening notes say about Servant leveling and Ascension?",
+    "source": "gameplay_basics.md — 从者养成",
+    "expected_facts": [
+      "Experience materials can raise Servant level.",
+      "Ascension raises the level cap.",
+      "Applicable Servants can have up to four Ascension stages."
+    ],
+    "forbidden_claims": [
+      "A universal level-120 target.",
+      "A fixed level increase per Ascension stage."
+    ],
+    "expected_scope_behavior": "Present the supported strengthening concepts without prescribing a universal endpoint.",
+    "notes": "Current-official strengthening case."
+  },
+  {
+    "id": "curated-004",
+    "category": "knowledge_hit",
+    "authority_scope": "CURRENT_OFFICIAL",
+    "question": "What does current official guidance support about skill strengthening?",
+    "source": "combat_mechanics.md — 技能等级",
+    "expected_facts": [
+      "Skill strengthening can improve performance.",
+      "Certain skill levels can reduce charge time."
+    ],
+    "forbidden_claims": [
+      "A universal skill-priority order.",
+      "Unsupported material thresholds."
+    ],
+    "expected_scope_behavior": "State the high-level strengthening behavior and acknowledge that exact thresholds are outside this corpus.",
+    "notes": "Avoid turning archive recommendations into official optimization advice."
+  },
+  {
+    "id": "curated-005",
+    "category": "knowledge_hit",
+    "authority_scope": "CURRENT_OFFICIAL",
+    "question": "How can Noble Phantasm performance be strengthened according to the current notes?",
+    "source": "combat_mechanics.md — 宝具等级与强化",
+    "expected_facts": [
+      "Copies of the same Servant can raise Noble Phantasm performance.",
+      "The supported maximum is five Noble Phantasm stages."
+    ],
+    "forbidden_claims": [
+      "An unsupported exact damage multiplier increase."
+    ],
+    "expected_scope_behavior": "Answer with the supported five-stage concept and avoid invented numeric formulas.",
+    "notes": "Current-official strengthening case."
+  },
+  {
+    "id": "curated-006",
+    "category": "knowledge_hit",
+    "authority_scope": "CURRENT_OFFICIAL",
+    "question": "What are the current official high-level associations of Quick, Arts, and Buster cards?",
+    "source": "combat_mechanics.md — 三种指令卡详解",
+    "expected_facts": [
+      "Quick is associated with Critical Stars and critical behavior.",
+      "Arts is associated with NP gain.",
+      "Buster is associated with higher damage."
+    ],
+    "forbidden_claims": [
+      "Unsupported highest/lowest rankings or exact card multipliers."
+    ],
+    "expected_scope_behavior": "Keep the answer qualitative and within the current official evidence scope.",
+    "notes": "Current-official Command Card case."
+  },
+  {
+    "id": "curated-007",
+    "category": "knowledge_hit",
+    "authority_scope": "CURRENT_OFFICIAL",
+    "question": "Which Command Card chain concepts are supported by the current official guidance?",
+    "source": "combat_mechanics.md — 三种指令卡详解",
+    "expected_facts": [
+      "The guidance covers 1st Bonus, Quick Chain, Arts Chain, and Buster Chain.",
+      "It also covers Brave Chain / Extra Attack and Mighty Chain."
+    ],
+    "forbidden_claims": [
+      "Unsupported numeric Chain bonuses."
+    ],
+    "expected_scope_behavior": "List the supported chain concepts without adding formulas.",
+    "notes": "Current-official chain inventory case."
+  },
+  {
+    "id": "curated-008",
+    "category": "knowledge_hit",
+    "authority_scope": "CURRENT_OFFICIAL",
+    "question": "What cards make a Mighty Chain and what does it provide?",
+    "source": "combat_mechanics.md — Mighty Chain",
+    "expected_facts": [
+      "A Mighty Chain uses one Quick, one Arts, and one Buster card.",
+      "It grants the corresponding first-card bonus effects."
+    ],
+    "forbidden_claims": [
+      "An exact bonus percentage not present in the corpus."
+    ],
+    "expected_scope_behavior": "Describe the composition and first-card bonus behavior without inventing a numeric value.",
+    "notes": "Current-official Mighty Chain case."
+  },
+  {
+    "id": "curated-009",
+    "category": "retrieval_discrimination",
+    "authority_scope": "CURRENT_OFFICIAL",
+    "question": "Which document should answer a question about Mighty Chain, and which document is archive strategy advice?",
+    "source": "combat_mechanics.md — Mighty Chain; strategy_guide.md — 周回攻略",
+    "expected_facts": [
+      "Mighty Chain belongs to the current-official combat mechanics document.",
+      "3T farming and named team archetypes belong to the archive editorial strategy document."
+    ],
+    "forbidden_claims": [
+      "Treating archive strategy as current official meta."
+    ],
+    "expected_scope_behavior": "Keep authority scopes distinct rather than blending mechanics and editorial advice.",
+    "notes": "Authority-aware retrieval discrimination case."
+  },
+  {
+    "id": "curated-010",
+    "category": "knowledge_hit",
+    "authority_scope": "ARCHIVE_HISTORICAL",
+    "question": "According to the Chaldea Archive's legacy world-setting material, how is Chaldea's mission described?",
+    "source": "world_setting.md — 人理续存保障机构 · 迦勒底",
+    "expected_facts": [
+      "The legacy snapshot describes Chaldea as an organization established to prevent the collapse of Human Order.",
+      "It describes observation of history and the future through Sheba."
+    ],
+    "forbidden_claims": [
+      "Presenting the legacy description as the complete current 2026 story state."
+    ],
+    "expected_scope_behavior": "Explicitly preserve the legacy/archive framing in the answer.",
+    "notes": "Historical provenance is part of the expected answer."
+  },
+  {
+    "id": "curated-011",
+    "category": "knowledge_hit",
+    "authority_scope": "ARCHIVE_HISTORICAL",
+    "question": "In the archive's historical description of Chaldea, what does the spiritron transfer room do?",
+    "source": "chaldea_facilities.md — 灵子转移室",
+    "expected_facts": [
+      "The legacy page describes converting a Master's soul into spiritron data.",
+      "It describes projecting that data to a specified time and space.",
+      "The page includes a warning about risks to the Master."
+    ],
+    "forbidden_claims": [
+      "Presenting the project-authored technology description as current official documentation."
+    ],
+    "expected_scope_behavior": "Answer as historical/project-authored archive material, not as a current technical specification.",
+    "notes": "Historical facilities case."
+  },
+  {
+    "id": "curated-012",
+    "category": "knowledge_hit",
+    "authority_scope": "ARCHIVE_EDITORIAL",
+    "question": "What does the archive strategy note mean by 3T farming?",
+    "source": "strategy_guide.md — 周回攻略",
+    "expected_facts": [
+      "It describes repeated clearing of a stage for materials or Master experience.",
+      "It presents compressing runs to a three-turn goal with AoE Servants and charge support as an archive approach."
+    ],
+    "forbidden_claims": [
+      "That the approach is guaranteed or universally optimal in the current meta."
+    ],
+    "expected_scope_behavior": "Preserve the project-authored archive/editorial scope and do not call it official current guidance.",
+    "notes": "Editorial strategy case."
+  },
+  {
+    "id": "curated-013",
+    "category": "knowledge_hit",
+    "authority_scope": "ARCHIVE_EDITORIAL",
+    "question": "What preparation ideas does the archive's high-difficulty strategy note list?",
+    "source": "strategy_guide.md — 高难攻略",
+    "expected_facts": [
+      "It mentions focused single-target damage.",
+      "It mentions Ignore Invincible for evade or invincibility situations.",
+      "It mentions debuff cleansing and buff removal preparation."
+    ],
+    "forbidden_claims": [
+      "A guaranteed solution for every high-difficulty quest.",
+      "Official or universally optimal current-meta status."
+    ],
+    "expected_scope_behavior": "Describe these as archive examples whose applicability depends on version and quest context.",
+    "notes": "Editorial countermeasure case."
+  },
+  {
+    "id": "curated-014",
+    "category": "follow_up",
+    "authority_scope": "ARCHIVE_EDITORIAL",
+    "conversation_group": "curated-followup-001",
+    "turn": 1,
+    "question": "According to the archive strategy notes, what should team building consider first?",
+    "source": "strategy_guide.md — 编队策略",
+    "expected_facts": [
+      "The archive notes recommend considering class advantage.",
+      "They describe damage-dealer, general-support, and emergency roles."
+    ],
+    "forbidden_claims": [
+      "A guaranteed current team composition."
+    ],
+    "expected_scope_behavior": "Start a clearly labeled archive/editorial conversation and avoid universal current-meta claims.",
+    "notes": "First turn of the curated follow-up group."
+  },
+  {
+    "id": "curated-015",
+    "category": "follow_up",
+    "authority_scope": "ARCHIVE_EDITORIAL",
+    "conversation_group": "curated-followup-001",
+    "turn": 2,
+    "question": "Following that archive discussion, what role considerations does the same strategy note add?",
+    "source": "strategy_guide.md — 编队策略",
+    "expected_facts": [
+      "The follow-up remains within the archive's class-advantage discussion.",
+      "It retains the damage-dealer, general-support, and emergency-role considerations."
+    ],
+    "forbidden_claims": [
+      "A new official or universally optimal team composition."
+    ],
+    "expected_scope_behavior": "Maintain the same archive/editorial scope and conversation context as turn 1.",
+    "notes": "Second turn must reuse only curated-followup-001's provider conversation ID."
+  },
+  {
+    "id": "curated-016",
+    "category": "out_of_scope_structured_fact",
+    "authority_scope": "STRUCTURED_TOOL_BOUNDARY",
+    "question": "What is Servant X's exact current skill cooldown and rarity?",
+    "source": "Future Tool Calling boundary: v2/apps/servants/services.py; no exact record in the prose corpus",
+    "expected_facts": [],
+    "forbidden_claims": [
+      "Any guessed skill, cooldown, rarity, or identity.",
+      "Treating structured Servant data as if it were present in RAG prose."
+    ],
+    "expected_scope_behavior": "State that the prose corpus is insufficient and reserve the request for the future structured Servant tool.",
+    "notes": "Boundary case; no Tool Calling is implemented in this phase."
+  }
+]

@@ -15,6 +15,12 @@ SUPPORTED_CATEGORIES = {
     "follow_up",
     "out_of_scope_structured_fact",
 }
+SUPPORTED_AUTHORITY_SCOPES = {
+    "CURRENT_OFFICIAL",
+    "ARCHIVE_HISTORICAL",
+    "ARCHIVE_EDITORIAL",
+    "STRUCTURED_TOOL_BOUNDARY",
+}
 REQUIRED_CASE_FIELDS = {
     "id",
     "category",
@@ -71,6 +77,23 @@ def load_cases(path):
                 raise CommandError(
                     f"case {case_id} {field} must be a JSON list of strings"
                 )
+
+        authority_scope = case.get("authority_scope")
+        if authority_scope is not None and (
+            not isinstance(authority_scope, str)
+            or authority_scope not in SUPPORTED_AUTHORITY_SCOPES
+        ):
+            raise CommandError(
+                f"case {case_id} has unsupported authority_scope: {authority_scope}"
+            )
+        expected_scope_behavior = case.get("expected_scope_behavior")
+        if expected_scope_behavior is not None and (
+            not isinstance(expected_scope_behavior, str)
+            or not expected_scope_behavior.strip()
+        ):
+            raise CommandError(
+                f"case {case_id} expected_scope_behavior must be a non-empty string"
+            )
 
         group = case.get("conversation_group")
         turn = case.get("turn")
@@ -162,6 +185,12 @@ class Command(BaseCommand):
                 "message_id": None,
                 "elapsed_seconds": None,
             }
+            if "authority_scope" in case:
+                record["authority_scope"] = case["authority_scope"]
+            if "expected_scope_behavior" in case:
+                record["expected_scope_behavior"] = case[
+                    "expected_scope_behavior"
+                ]
             try:
                 provider_result = services.chat(
                     case["question"], conversation_id=conversation_id

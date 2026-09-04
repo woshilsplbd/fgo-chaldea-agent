@@ -381,6 +381,57 @@ class AgentEvaluationCommandTests(TestCase):
 
     @override_settings(DIFY_API_BASE_URL="https://dify.example/v1", DIFY_API_KEY="dummy")
     @patch("apps.agent.management.commands.evaluate_agent.services.chat")
+    def test_curated_scope_metadata_survives_output(self, chat):
+        chat.return_value = {
+            "answer": "safe",
+            "conversation_id": None,
+            "message_id": None,
+        }
+        curated_case = {
+            "id": "curated-case",
+            "category": "knowledge_hit",
+            "authority_scope": "CURRENT_OFFICIAL",
+            "question": "current question",
+            "source": "gameplay_basics.md — 游戏基础",
+            "expected_facts": ["fact"],
+            "forbidden_claims": [],
+            "expected_scope_behavior": "Answer within current official scope.",
+        }
+        with TemporaryDirectory() as directory:
+            cases = self.write_cases(directory, cases=[curated_case])
+            output = Path(directory) / "results.json"
+            call_command("evaluate_agent", cases=str(cases), output=str(output))
+            result = json.loads(output.read_text(encoding="utf-8"))["results"][0]
+
+        self.assertEqual(result["authority_scope"], "CURRENT_OFFICIAL")
+        self.assertEqual(
+            result["expected_scope_behavior"], "Answer within current official scope."
+        )
+
+    @override_settings(DIFY_API_BASE_URL="https://dify.example/v1", DIFY_API_KEY="dummy")
+    def test_invalid_authority_scope_fails_clearly(self):
+        with TemporaryDirectory() as directory:
+            cases = self.write_cases(
+                directory,
+                cases=[
+                    {
+                        "id": "invalid-scope",
+                        "category": "knowledge_hit",
+                        "authority_scope": "NOT_ALLOWED",
+                        "question": "question",
+                        "source": "source",
+                        "expected_facts": [],
+                        "forbidden_claims": [],
+                    }
+                ],
+            )
+            output = Path(directory) / "results.json"
+
+            with self.assertRaisesRegex(CommandError, "authority_scope"):
+                call_command("evaluate_agent", cases=str(cases), output=str(output))
+
+    @override_settings(DIFY_API_BASE_URL="https://dify.example/v1", DIFY_API_KEY="dummy")
+    @patch("apps.agent.management.commands.evaluate_agent.services.chat")
     def test_provider_failure_is_recorded_without_exception_details(self, chat):
         chat.side_effect = [
             services.AgentServiceError("private upstream body"),
