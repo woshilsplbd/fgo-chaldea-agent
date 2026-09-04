@@ -329,14 +329,13 @@
                         </ul>
                     </li>
                     <li class="dropdown" id="news">
-                        <a href="#" class="dropdown-toggle on" data-toggle="dropdown">
+                        <a href="{% url 'news:index' %}" class="dropdown-toggle on" data-toggle="dropdown">
                             活动情报 <span class="caret"></span>
                         </a>
                         <ul class="dropdown-menu">
-                            <!-- Phase 7 will restore news routes. -->
-                            <li><a href="#">主线剧情</a></li>
-                            <li><a href="#">限时活动</a></li>
-                            <li><a href="#">召唤公告</a></li>
+                            <li><a href="{% url 'news:index' %}">主线剧情</a></li>
+                            <li><a href="{% url 'news:index' %}">限时活动</a></li>
+                            <li><a href="{% url 'news:index' %}">召唤公告</a></li>
                         </ul>
                     </li>
                     <li class="dropdown" id="products">

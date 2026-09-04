@@ -1,0 +1,16 @@
+{% extends "base.html" %}
+
+{% block title %}{{ article.title }}{% endblock %}
+
+{% block content %}
+<main id="news-detail" class="container" style="padding: 34px 0 48px;">
+    <p><a href="{% url 'news:index' %}">← 返回活动情报</a></p>
+    <article>
+        <h1>{{ article.title }}</h1>
+        <p class="text-muted">
+            {{ article.news_type }} · {{ article.publish_date|date:"Y-m-d H:i" }} · 浏览 {{ article.views }}
+        </p>
+        <div style="white-space: normal; line-height: 1.9;">{{ article.description|linebreaksbr }}</div>
+    </article>
+</main>
+{% endblock %}

@@ -6,6 +6,8 @@ from tempfile import TemporaryDirectory
 from django.core.management import call_command
 from django.core.management.base import CommandError
 from django.test import TestCase
+from django.urls import reverse
+from django.utils import timezone
 
 from .models import NewsArticle
 
@@ -110,3 +112,61 @@ class NewsArticleTests(TestCase):
 
         with self.assertRaisesRegex(CommandError, "missing fields: description"):
             self.run_import(rows)
+
+
+class NewsPagesTests(TestCase):
+    @classmethod
+    def setUpTestData(cls):
+        now = timezone.now()
+        cls.matching = NewsArticle.objects.create(
+            title="BB 召唤公告",
+            description="限时召唤说明",
+            news_type="召唤公告",
+            publish_date=now,
+        )
+        cls.other = NewsArticle.objects.create(
+            title="迦勒底主线记录",
+            description="第二章内容 <script>alert('x')</script>",
+            news_type="主线剧情",
+            publish_date=now,
+        )
+
+    def test_news_index_lists_articles(self):
+        response = self.client.get(reverse("news:index"))
+
+        self.assertEqual(response.status_code, 200)
+        self.assertTemplateUsed(response, "news/index.html")
+        self.assertContains(response, 'id="news-browser"')
+        self.assertContains(response, self.matching.title)
+        self.assertContains(response, self.other.title)
+
+    def test_news_index_search_matches_title(self):
+        response = self.client.get(reverse("news:index"), {"q": "BB"})
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, self.matching.title)
+        self.assertNotContains(response, self.other.title)
+        self.assertContains(response, 'value="BB"')
+
+    def test_news_index_no_match_shows_empty_state(self):
+        response = self.client.get(reverse("news:index"), {"q": "not-found"})
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, 'id="news-empty-state"')
+        self.assertNotContains(response, self.matching.title)
+
+    def test_news_detail_escapes_description_and_increments_views(self):
+        response = self.client.get(reverse("news:detail", args=[self.other.pk]))
+
+        self.assertEqual(response.status_code, 200)
+        self.assertTemplateUsed(response, "news/detail.html")
+        self.assertContains(response, 'id="news-detail"')
+        self.assertContains(response, "&lt;script&gt;alert(&#x27;x&#x27;)&lt;/script&gt;")
+        self.assertNotContains(response, "<script>alert('x')</script>")
+        self.other.refresh_from_db()
+        self.assertEqual(self.other.views, 1)
+
+    def test_news_detail_missing_article_returns_404(self):
+        response = self.client.get(reverse("news:detail", args=[999999]))
+
+        self.assertEqual(response.status_code, 404)
