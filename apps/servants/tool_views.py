@@ -76,7 +76,7 @@ def _compact_detail(detail):
 
 
 def _name_matches(name):
-    servants = services.fetch_servants("all")
+    servants = services.fetch_atlas_servants_by_name(name)
     normalized_name = name.casefold()
     exact = [
         servant
@@ -85,12 +85,7 @@ def _name_matches(name):
     ]
     if exact:
         return exact
-
-    return [
-        servant
-        for servant in servants
-        if normalized_name in str(servant.get("name", "")).casefold()
-    ]
+    return servants
 
 
 def _lookup_detail(servant_id):

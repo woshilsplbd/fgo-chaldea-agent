@@ -98,7 +98,7 @@ class ServantToolApiTests(TestCase):
 
     @override_settings(AGENT_TOOL_API_TOKEN=token)
     @patch("apps.servants.tool_views.services.fetch_atlas_servant_detail")
-    @patch("apps.servants.tool_views.services.fetch_servants")
+    @patch("apps.servants.tool_views.services.fetch_atlas_servants_by_name")
     def test_name_lookup_ignores_empty_optional_id_values(self, fetch_servants, fetch_detail):
         fetch_servants.return_value = [
             {"id": 42, "collectionNo": 42, "name": "Oberon", "className": "pretender", "rarity": 5}
@@ -115,12 +115,12 @@ class ServantToolApiTests(TestCase):
                 )
 
                 self.assertEqual(response.status_code, 200)
-                fetch_servants.assert_called_once_with("all")
+                fetch_servants.assert_called_once_with("Oberon")
                 fetch_detail.assert_called_once_with(42)
 
     @override_settings(AGENT_TOOL_API_TOKEN=token)
     @patch("apps.servants.tool_views.services.fetch_atlas_servant_detail")
-    @patch("apps.servants.tool_views.services.fetch_servants")
+    @patch("apps.servants.tool_views.services.fetch_atlas_servants_by_name")
     def test_name_lookup_is_trimmed_and_exact_case_insensitive(self, fetch_servants, fetch_detail):
         fetch_servants.return_value = [
             {
@@ -136,7 +136,7 @@ class ServantToolApiTests(TestCase):
         response = self.post({"name": "  oberon  "}, token=self.token)
 
         self.assertEqual(response.status_code, 200)
-        fetch_servants.assert_called_once_with("all")
+        fetch_servants.assert_called_once_with("oberon")
         fetch_detail.assert_called_once_with(42)
 
     @override_settings(AGENT_TOOL_API_TOKEN=token)
@@ -196,7 +196,7 @@ class ServantToolApiTests(TestCase):
         self.assertEqual(response.json()["code"], "servant_not_found")
 
     @override_settings(AGENT_TOOL_API_TOKEN=token)
-    @patch("apps.servants.tool_views.services.fetch_servants")
+    @patch("apps.servants.tool_views.services.fetch_atlas_servants_by_name")
     def test_name_not_found_returns_404(self, fetch_servants):
         fetch_servants.return_value = []
         response = self.post({"name": "Unknown"}, token=self.token)
@@ -204,7 +204,7 @@ class ServantToolApiTests(TestCase):
         self.assertEqual(response.json()["code"], "servant_not_found")
 
     @override_settings(AGENT_TOOL_API_TOKEN=token)
-    @patch("apps.servants.tool_views.services.fetch_servants")
+    @patch("apps.servants.tool_views.services.fetch_atlas_servants_by_name")
     def test_ambiguous_name_returns_409_with_compact_candidates(self, fetch_servants):
         fetch_servants.return_value = [
             {"id": 1, "name": "Artoria Alter", "className": "saber", "rarity": 5, "skills": []},
@@ -220,6 +220,17 @@ class ServantToolApiTests(TestCase):
             {"id", "name", "className", "rarity"},
         )
         self.assertNotIn("skills", response.content.decode())
+
+    @override_settings(AGENT_TOOL_API_TOKEN=token)
+    @patch("apps.servants.tool_views.services.fetch_atlas_servants_by_name")
+    def test_name_search_upstream_failure_returns_502(self, fetch_servants):
+        fetch_servants.side_effect = requests.RequestException("private upstream search")
+
+        response = self.post({"name": "Oberon"}, token=self.token)
+
+        self.assertEqual(response.status_code, 502)
+        self.assertEqual(response.json()["code"], "servant_upstream_error")
+        self.assertNotIn("private upstream search", response.content.decode())
 
     @override_settings(AGENT_TOOL_API_TOKEN=token)
     @patch("apps.servants.tool_views.services.fetch_atlas_servant_detail")

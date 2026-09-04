@@ -1,4 +1,4 @@
-from unittest.mock import patch
+from unittest.mock import Mock, patch
 
 import requests
 from django.test import TestCase
@@ -10,10 +10,29 @@ class ServantsApiTests(TestCase):
     def setUp(self):
         services._servant_cache.clear()
         services._servant_detail_cache.clear()
+        services._servant_name_cache.clear()
 
     def tearDown(self):
         services._servant_cache.clear()
         services._servant_detail_cache.clear()
+        services._servant_name_cache.clear()
+
+    @patch("apps.servants.services.requests.get")
+    def test_atlas_name_search_uses_name_query_parameter(self, request_get):
+        response = Mock()
+        response.json.return_value = [
+            {"id": 42, "collectionNo": 42, "name": "オベロン", "className": "pretender"}
+        ]
+        request_get.return_value = response
+
+        results = services.fetch_atlas_servants_by_name("  Oberon ")
+
+        request_get.assert_called_once_with(
+            services.ATLAS_SERVANT_SEARCH_URL,
+            params={"name": "Oberon"},
+            timeout=8,
+        )
+        self.assertEqual(results[0]["id"], 42)
 
     def test_servant_page_uses_namespaced_template(self):
         response = self.client.get("/servants/")

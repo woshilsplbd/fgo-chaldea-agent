@@ -42,6 +42,7 @@ CLASS_ALIASES = {
 
 _servant_cache = {}
 _servant_detail_cache = {}
+_servant_name_cache = {}
 
 
 class AtlasNotFoundError(Exception):
@@ -80,10 +81,15 @@ def find_first_image(value):
     return ""
 
 
-def request_atlas(class_name):
+def request_atlas(class_name=None, *, name=None):
+    params = {}
+    if class_name is not None:
+        params["className"] = class_name
+    if name is not None:
+        params["name"] = name
     response = requests.get(
         ATLAS_SERVANT_SEARCH_URL,
-        params={"className": class_name},
+        params=params,
         timeout=8,
     )
     response.raise_for_status()
@@ -113,6 +119,31 @@ def fetch_atlas_servants_by_class(class_name):
         data = []
 
     _servant_cache[class_name] = {"time": now, "data": data}
+    return data
+
+
+def fetch_atlas_servants_by_name(name):
+    normalized_name = (name or "").strip()
+    cache_key = normalized_name.casefold()
+    now = time.time()
+    cached = _servant_name_cache.get(cache_key)
+    if cached and now - cached["time"] < CACHE_SECONDS:
+        return cached["data"]
+
+    raw_servants = request_atlas(name=normalized_name)
+    if not isinstance(raw_servants, list):
+        raw_servants = []
+
+    servants_by_id = {}
+    for servant in raw_servants:
+        if not isinstance(servant, dict):
+            continue
+        servant_id = servant.get("collectionNo") or servant.get("id")
+        if servant_id:
+            servants_by_id[servant_id] = servant
+
+    data = [normalize_servant(servant) for servant in servants_by_id.values()]
+    _servant_name_cache[cache_key] = {"time": now, "data": data}
     return data
 
 
