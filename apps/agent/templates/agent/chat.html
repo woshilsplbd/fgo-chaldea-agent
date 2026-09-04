@@ -10,21 +10,23 @@
                 <header class="fgo-card">
                     <h1 class="fgo-section-header">迦勒底智能终端</h1>
                     <p>Chaldea Agent 将帮助你查询和理解 FGO 游戏知识。</p>
-                    <p class="text-muted">当前为展示骨架，后续阶段将接入 Agent 对话能力。</p>
+                    <p class="text-muted">当前 Agent 服务尚未配置，暂时无法生成回答。</p>
                 </header>
 
                 <section class="fgo-card" aria-labelledby="agent-conversation-title">
                     <h2 id="agent-conversation-title">Chaldea Agent</h2>
                     <div id="agent-messages" class="agent-messages" aria-live="polite">
-                        <p id="agent-status" class="text-muted">Agent 后端尚未连接。对话功能将在后续阶段开放。</p>
+                        <p id="agent-status" class="text-muted" role="status">Agent 后端尚未连接。</p>
                     </div>
 
-                    <form id="agent-composer" class="input-group" method="post">
+                    <form id="agent-composer" class="input-group" method="post"
+                        action="{% url 'agent_api:chat' %}">
+                        {% csrf_token %}
                         <label class="sr-only" for="agent-input">输入问题</label>
-                        <input id="agent-input" class="form-control" type="text"
-                            placeholder="Agent 后端尚未连接" disabled>
+                        <input id="agent-input" class="form-control" type="text" name="message"
+                            placeholder="输入你的 FGO 问题" autocomplete="off" required>
                         <span class="input-group-btn">
-                            <button id="agent-send" class="btn btn-default" type="submit" disabled>发送</button>
+                            <button id="agent-send" class="btn btn-default" type="submit">发送</button>
                         </span>
                     </form>
                 </section>
@@ -32,4 +34,82 @@
         </div>
     </div>
 </main>
+<script>
+    (function () {
+        const composer = document.getElementById("agent-composer");
+        const input = document.getElementById("agent-input");
+        const sendButton = document.getElementById("agent-send");
+        const messages = document.getElementById("agent-messages");
+        const status = document.getElementById("agent-status");
+        const csrfToken = composer.querySelector("[name=csrfmiddlewaretoken]").value;
+        const endpoint = composer.action;
+        let conversationId = null;
+
+        function addMessage(label, text, className) {
+            const message = document.createElement("p");
+            message.className = className;
+            const prefix = document.createElement("strong");
+            prefix.textContent = label + "：";
+            message.appendChild(prefix);
+            message.appendChild(document.createTextNode(text));
+            messages.appendChild(message);
+            message.scrollIntoView({ block: "nearest" });
+        }
+
+        function setBusy(isBusy) {
+            input.disabled = isBusy;
+            sendButton.disabled = isBusy;
+        }
+
+        composer.addEventListener("submit", function (event) {
+            event.preventDefault();
+            const message = input.value.trim();
+            if (!message || sendButton.disabled) return;
+
+            addMessage("你", message, "agent-user-message");
+            input.value = "";
+            status.textContent = "正在连接 Agent 服务……";
+            status.className = "text-muted";
+            setBusy(true);
+
+            const payload = { message: message };
+            if (conversationId) payload.conversation_id = conversationId;
+
+            fetch(endpoint, {
+                method: "POST",
+                headers: {
+                    "Content-Type": "application/json",
+                    "X-CSRFToken": csrfToken
+                },
+                body: JSON.stringify(payload)
+            })
+                .then(function (response) {
+                    return response.json().then(function (data) {
+                        return { response: response, data: data };
+                    });
+                })
+                .then(function (result) {
+                    const data = result.data;
+                    if (!result.response.ok || !data.ok) {
+                        status.textContent = data.message || "Agent 服务暂时不可用。";
+                        status.className = "text-danger";
+                        return;
+                    }
+
+                    conversationId = data.conversation_id || null;
+                    addMessage("Agent", data.answer || "", "agent-assistant-message");
+                    status.textContent = "Agent 服务已连接。";
+                    status.className = "text-muted";
+                })
+                .catch(function () {
+                    status.textContent = "Agent 服务暂时不可用，请稍后重试。";
+                    status.className = "text-danger";
+                })
+                .finally(function () {
+                    setBusy(false);
+                    input.focus();
+                });
+        });
+    }());
+</script>
 {% endblock %}
