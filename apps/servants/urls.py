@@ -13,4 +13,5 @@ urlpatterns = [
 
 page_urlpatterns = [
     path("", views.index, name="index"),
+    path("<int:servant_id>/", views.detail, name="detail"),
 ]

@@ -78,11 +78,20 @@
     }
 
     .servant-card {
+        display: block;
         overflow: hidden;
         border: 1px solid #ddd6fe;
         border-radius: 6px;
+        color: inherit;
         background: #fff;
         box-shadow: 0 8px 20px rgba(30, 41, 59, .1);
+        text-decoration: none;
+    }
+
+    .servant-card:hover,
+    .servant-card:focus {
+        color: inherit;
+        text-decoration: none;
     }
 
     .servant-card-image {
@@ -247,8 +256,15 @@
         }
 
         function createCard(servant) {
-            const card = document.createElement('article');
+            const detailId = servant.id || servant.collectionNo;
+            const numericId = Number(detailId);
+            const hasDetailRoute = Number.isInteger(numericId) && numericId > 0;
+            const card = document.createElement(hasDetailRoute ? 'a' : 'article');
             card.className = 'servant-card';
+            if (hasDetailRoute) {
+                card.href = '/servants/' + encodeURIComponent(String(numericId)) + '/';
+                card.setAttribute('aria-label', '查看 ' + (servant.name || '英灵资料') + '详情');
+            }
 
             const image = document.createElement('img');
             image.className = 'servant-card-image';

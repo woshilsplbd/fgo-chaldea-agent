@@ -1,0 +1,338 @@
+{% extends "base.html" %}
+{% load static %}
+
+{% block title %}英灵详情{% endblock %}
+
+{% block content %}
+<style>
+    .servant-detail-page {
+        padding: 34px 0 52px;
+    }
+
+    .servant-detail-back {
+        display: inline-block;
+        margin-bottom: 18px;
+    }
+
+    .servant-detail-card {
+        display: grid;
+        grid-template-columns: minmax(260px, 42%) 1fr;
+        overflow: hidden;
+        border: 1px solid #ddd6fe;
+        border-radius: 8px;
+        background: #fff;
+        box-shadow: 0 14px 32px rgba(30, 41, 59, .12);
+    }
+
+    .servant-detail-image-wrap {
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        min-height: 440px;
+        padding: 24px;
+        background:
+            linear-gradient(145deg, rgba(15, 23, 42, .92), rgba(88, 28, 135, .78)),
+            url("{% static 'img/sakurafive.png' %}") center/cover;
+    }
+
+    .servant-detail-image {
+        display: block;
+        width: 100%;
+        max-height: 620px;
+        object-fit: contain;
+    }
+
+    .servant-detail-content {
+        padding: 30px;
+    }
+
+    .servant-detail-content h1 {
+        margin: 0 0 12px;
+        color: #172554;
+        font-size: 32px;
+        font-weight: 700;
+    }
+
+    .servant-detail-meta {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 8px;
+        margin-bottom: 24px;
+    }
+
+    .servant-detail-chip {
+        display: inline-block;
+        padding: 6px 10px;
+        border: 1px solid #ddd6fe;
+        border-radius: 4px;
+        color: #475569;
+        font-size: 13px;
+        background: #f8fafc;
+    }
+
+    .servant-detail-rarity {
+        margin: 0 0 18px;
+        color: #ca8a04;
+        font-size: 20px;
+    }
+
+    .servant-detail-section {
+        margin-top: 24px;
+        padding-top: 20px;
+        border-top: 1px solid #e2e8f0;
+    }
+
+    .servant-detail-section h2 {
+        margin: 0 0 14px;
+        color: #312e81;
+        font-size: 20px;
+        font-weight: 700;
+    }
+
+    .servant-detail-description {
+        color: #475569;
+        line-height: 1.9;
+        white-space: pre-line;
+    }
+
+    .servant-detail-list {
+        display: grid;
+        gap: 12px;
+    }
+
+    .servant-detail-item {
+        padding: 14px;
+        border: 1px solid #e2e8f0;
+        border-radius: 6px;
+        background: #f8fafc;
+    }
+
+    .servant-detail-item h3 {
+        margin: 0 0 8px;
+        color: #172554;
+        font-size: 16px;
+        font-weight: 700;
+    }
+
+    .servant-detail-item p {
+        margin: 6px 0 0;
+        color: #475569;
+        line-height: 1.7;
+        white-space: pre-line;
+    }
+
+    .servant-detail-item-icon {
+        float: left;
+        width: 44px;
+        height: 44px;
+        margin: 0 10px 6px 0;
+        border-radius: 4px;
+        object-fit: cover;
+    }
+
+    .servant-detail-state {
+        padding: 28px;
+        border: 1px solid #ddd6fe;
+        border-radius: 8px;
+        color: #475569;
+        background: #f8fafc;
+        text-align: center;
+    }
+
+    @media (max-width: 767px) {
+        .servant-detail-card {
+            display: block;
+        }
+
+        .servant-detail-image-wrap {
+            min-height: 300px;
+        }
+
+        .servant-detail-content {
+            padding: 22px;
+        }
+    }
+</style>
+
+<main id="servant-detail" class="container servant-detail-page" data-servant-id="{{ servant_id }}">
+    <a class="servant-detail-back" href="{% url 'servants:index' %}">← 返回英灵资料</a>
+    <div id="servant-detail-state" class="servant-detail-state" role="status" aria-live="polite">
+        正在加载英灵资料...
+    </div>
+
+    <article id="servant-detail-card" class="servant-detail-card" hidden>
+        <div class="servant-detail-image-wrap">
+            <img id="servant-detail-image" class="servant-detail-image" alt="英灵资料">
+        </div>
+        <div class="servant-detail-content">
+            <h1 id="servant-detail-name"></h1>
+            <p id="servant-detail-rarity" class="servant-detail-rarity"></p>
+            <div id="servant-detail-meta" class="servant-detail-meta"></div>
+
+            <section class="servant-detail-section">
+                <h2>简介</h2>
+                <p id="servant-detail-description" class="servant-detail-description"></p>
+            </section>
+
+            <section class="servant-detail-section">
+                <h2>宝具</h2>
+                <div id="servant-detail-noble-phantasms" class="servant-detail-list"></div>
+            </section>
+
+            <section class="servant-detail-section">
+                <h2>技能</h2>
+                <div id="servant-detail-skills" class="servant-detail-list"></div>
+            </section>
+        </div>
+    </article>
+</main>
+
+<script>
+    (function () {
+        const fallbackImage = "{% static 'img/sakurafive.png' %}";
+        const detailPage = document.getElementById('servant-detail');
+        const stateBox = document.getElementById('servant-detail-state');
+        const detailCard = document.getElementById('servant-detail-card');
+        const detailImage = document.getElementById('servant-detail-image');
+        const detailName = document.getElementById('servant-detail-name');
+        const detailRarity = document.getElementById('servant-detail-rarity');
+        const detailMeta = document.getElementById('servant-detail-meta');
+        const detailDescription = document.getElementById('servant-detail-description');
+        const noblePhantasms = document.getElementById('servant-detail-noble-phantasms');
+        const skills = document.getElementById('servant-detail-skills');
+        const servantId = detailPage.getAttribute('data-servant-id');
+        const apiUrl = "{% url 'servants_api:detail' servant_id %}";
+
+        function safeImageUrl(value) {
+            try {
+                const url = new URL(String(value || ''), window.location.origin);
+                return url.protocol === 'http:' || url.protocol === 'https:' ? url.href : fallbackImage;
+            } catch (error) {
+                return fallbackImage;
+            }
+        }
+
+        function showState(message) {
+            stateBox.textContent = message;
+            stateBox.hidden = false;
+            detailCard.hidden = true;
+        }
+
+        function addMeta(label, value) {
+            const chip = document.createElement('span');
+            chip.className = 'servant-detail-chip';
+            chip.textContent = label + value;
+            detailMeta.appendChild(chip);
+        }
+
+        function addEmptyState(container, message) {
+            const empty = document.createElement('p');
+            empty.className = 'servant-detail-description';
+            empty.textContent = message;
+            container.appendChild(empty);
+        }
+
+        function addNoblePhantasm(noble) {
+            const item = document.createElement('article');
+            item.className = 'servant-detail-item';
+            const heading = document.createElement('h3');
+            heading.textContent = noble.name || '未记录';
+            item.appendChild(heading);
+            const tags = document.createElement('p');
+            tags.textContent = 'Rank：' + (noble.rank || '未记录') +
+                (noble.card ? '　类型：' + noble.card : '');
+            item.appendChild(tags);
+            const detail = document.createElement('p');
+            detail.textContent = noble.detail || '暂无宝具说明。';
+            item.appendChild(detail);
+            noblePhantasms.appendChild(item);
+        }
+
+        function addSkill(skill) {
+            const item = document.createElement('article');
+            item.className = 'servant-detail-item';
+            if (skill.icon) {
+                const icon = document.createElement('img');
+                icon.className = 'servant-detail-item-icon';
+                icon.src = safeImageUrl(skill.icon);
+                icon.alt = skill.name || '技能图标';
+                icon.addEventListener('error', function () {
+                    icon.remove();
+                }, { once: true });
+                item.appendChild(icon);
+            }
+            const heading = document.createElement('h3');
+            heading.textContent = skill.name || '未记录';
+            item.appendChild(heading);
+            const rank = document.createElement('p');
+            rank.textContent = 'Rank：' + (skill.rank || '未记录');
+            item.appendChild(rank);
+            if (skill.detail) {
+                const detail = document.createElement('p');
+                detail.textContent = skill.detail;
+                item.appendChild(detail);
+            }
+            skills.appendChild(item);
+        }
+
+        function renderServant(servant) {
+            detailName.textContent = servant.name || '未记录';
+            detailRarity.textContent = servant.rarityStars || '未记录';
+            detailMeta.replaceChildren();
+            addMeta('职阶：', servant.displayClassName || servant.className || servant.classType || 'Unknown');
+            addMeta('稀有度：', (servant.rarity || 0) + ' 星');
+            addMeta('编号：No.', servant.collectionNo || '-');
+            detailDescription.textContent = servant.description || '暂无简介。';
+            detailImage.src = safeImageUrl(servant.largeImage || servant.image || servant.face);
+            detailImage.alt = servant.name || '英灵资料';
+            detailImage.addEventListener('error', function () {
+                detailImage.src = fallbackImage;
+            }, { once: true });
+
+            noblePhantasms.replaceChildren();
+            const nobleList = Array.isArray(servant.noblePhantasms) ? servant.noblePhantasms : [];
+            if (nobleList.length) {
+                nobleList.forEach(addNoblePhantasm);
+            } else {
+                addEmptyState(noblePhantasms, '暂无宝具资料。');
+            }
+
+            skills.replaceChildren();
+            const skillList = Array.isArray(servant.skills) ? servant.skills : [];
+            if (skillList.length) {
+                skillList.forEach(addSkill);
+            } else {
+                addEmptyState(skills, '暂无技能资料。');
+            }
+
+            stateBox.hidden = true;
+            detailCard.hidden = false;
+        }
+
+        showState('正在加载英灵资料...');
+        fetch(apiUrl)
+            .then(function (response) {
+                if (response.status === 404) {
+                    throw new Error('not-found');
+                }
+                if (!response.ok) {
+                    throw new Error('request-failed');
+                }
+                return response.json();
+            })
+            .then(function (data) {
+                if (!data.ok || !data.servant) {
+                    throw new Error('request-failed');
+                }
+                renderServant(data.servant);
+            })
+            .catch(function (error) {
+                if (error.message === 'not-found') {
+                    showState('未找到指定的英灵资料。');
+                } else {
+                    showState('英灵资料加载失败，请稍后重试。');
+                }
+            });
+    }());
+</script>
+{% endblock %}

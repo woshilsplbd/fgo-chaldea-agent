@@ -21,6 +21,15 @@ class ServantsApiTests(TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertTemplateUsed(response, "servants/index.html")
         self.assertContains(response, 'id="servant-browser"')
+        self.assertContains(response, "/servants/")
+
+    def test_servant_detail_page_uses_namespaced_template(self):
+        response = self.client.get("/servants/42/")
+
+        self.assertEqual(response.status_code, 200)
+        self.assertTemplateUsed(response, "servants/detail.html")
+        self.assertContains(response, 'id="servant-detail"')
+        self.assertContains(response, "/api/servants/42/")
 
     @patch("apps.servants.views.services.fetch_atlas_servant_detail")
     def test_detail_success_returns_normalized_servant(self, fetch_detail):

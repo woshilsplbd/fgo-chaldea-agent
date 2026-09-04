@@ -10,6 +10,14 @@ def index(request):
     return render(request, "servants/index.html", {"active_menu": "products"})
 
 
+def detail(request, servant_id):
+    return render(
+        request,
+        "servants/detail.html",
+        {"active_menu": "products", "servant_id": servant_id},
+    )
+
+
 def servant_detail_api(request, servant_id):
     try:
         raw_servant = services.fetch_atlas_servant_detail(servant_id)
