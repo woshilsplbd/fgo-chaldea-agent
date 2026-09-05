@@ -1,7 +1,7 @@
 import json
 from pathlib import Path
 from tempfile import TemporaryDirectory
-from unittest.mock import call, patch
+from unittest.mock import Mock, call, patch
 
 import requests
 from django.core.management import call_command
@@ -352,7 +352,7 @@ class AgentEvaluationCommandTests(TestCase):
         return path
 
     @override_settings(DIFY_API_BASE_URL="https://dify.example/v1", DIFY_API_KEY="dummy")
-    @patch("apps.agent.management.commands.evaluate_agent.services.chat")
+    @patch("apps.agent.management.commands.evaluate_agent.stream_dify_chat")
     def test_runner_writes_metadata_and_isolates_conversations(self, chat):
         calls = []
 
@@ -386,33 +386,22 @@ class AgentEvaluationCommandTests(TestCase):
         self.assertNotIn("dummy", output_text)
 
     @override_settings(DIFY_API_BASE_URL="https://dify.example/v1", DIFY_API_KEY="dummy")
-    @patch("apps.agent.management.commands.evaluate_agent.requests.get")
-    @patch("apps.agent.management.commands.evaluate_agent.services.chat")
-    def test_runner_records_routing_metadata_and_redacts_secrets(self, chat, history_get):
+    @patch("apps.agent.management.commands.evaluate_agent.stream_dify_chat")
+    def test_runner_records_routing_metadata_and_redacts_secrets(self, chat):
         chat.return_value = {
             "answer": "Oberon is a Pretender.",
             "conversation_id": "conversation-1",
             "message_id": "message-1",
-        }
-        history_get.return_value.raise_for_status.return_value = None
-        history_get.return_value.json.return_value = {
-            "data": [
-                {"id": "unrelated", "agent_thoughts": [], "retriever_resources": []},
-                {
-                    "id": "message-1",
-                    "agent_thoughts": [
-                        {"tool": "", "tool_input": "", "observation": "ignored"},
-                        {
-                            "tool": "lookup_servant",
-                            "tool_input": json.dumps(
-                                {"servant_id": 42, "api_key": "private-key"}
-                            ),
-                            "observation": {"status": 200},
-                        },
-                    ],
-                    "retriever_resources": [],
-                },
-            ]
+            "trace_status": "ok",
+            "trace_source": "stream",
+            "workflow_run_id": "workflow-1",
+            "executed_nodes": [],
+            "tool_invoked": True,
+            "tool_name": "lookup_servant",
+            "tool_input": {"servant_id": 42, "api_key": "[redacted]"},
+            "tool_response_metadata": {"status": 200},
+            "retrieval_used": False,
+            "actual_routing": "servant_tool",
         }
         with TemporaryDirectory() as directory:
             cases = self.write_cases(directory, cases=[
@@ -441,16 +430,6 @@ class AgentEvaluationCommandTests(TestCase):
         self.assertEqual(result["actual_routing"], "servant_tool")
         self.assertTrue(result["routing_match"])
         self.assertNotIn("private-key", output_text)
-        history_get.assert_called_once_with(
-            "https://dify.example/v1/messages",
-            headers={"Authorization": "Bearer dummy"},
-            params={
-                "conversation_id": "conversation-1",
-                "user": "chaldea-agent-dev",
-                "limit": 20,
-            },
-            timeout=30.0,
-        )
 
     @override_settings(DIFY_API_BASE_URL="https://dify.example/v1", DIFY_API_KEY="dummy")
     def trace_from_message(self, message):
@@ -536,17 +515,9 @@ class AgentEvaluationCommandTests(TestCase):
         self.assertIsNone(trace["retrieval_used"])
 
     @override_settings(DIFY_API_BASE_URL="https://dify.example/v1", DIFY_API_KEY="dummy")
-    @patch(
-        "apps.agent.management.commands.evaluate_agent.requests.get",
-        side_effect=requests.RequestException("private history failure"),
-    )
-    @patch("apps.agent.management.commands.evaluate_agent.services.chat")
-    def test_trace_failure_preserves_successful_answer(self, chat, history_get):
-        chat.return_value = {
-            "answer": "safe answer",
-            "conversation_id": "conversation-1",
-            "message_id": "message-1",
-        }
+    @patch("apps.agent.management.commands.evaluate_agent.stream_dify_chat")
+    def test_stream_failure_records_controlled_error(self, chat):
+        chat.side_effect = evaluate_agent.StreamingEvaluationError("private stream failure")
         with TemporaryDirectory() as directory:
             cases = self.write_cases(directory, cases=[
                 {
@@ -556,23 +527,133 @@ class AgentEvaluationCommandTests(TestCase):
                     "source": "source",
                     "expected_facts": [],
                     "forbidden_claims": [],
-                    "expected_routing": "rag",
                 }
             ])
             output = Path(directory) / "results.json"
             call_command("evaluate_agent", cases=str(cases), output=str(output))
             result = json.loads(output.read_text(encoding="utf-8"))["results"][0]
 
-        self.assertEqual(result["status"], "success")
-        self.assertTrue(result["success"])
-        self.assertEqual(result["answer"], "safe answer")
-        self.assertEqual(result["trace_status"], "unavailable")
+        self.assertEqual(result["status"], "error")
+        self.assertFalse(result["success"])
+        self.assertEqual(result["error"]["code"], "agent_stream_error")
         self.assertEqual(result["actual_routing"], "unknown")
         self.assertFalse(result["routing_match"])
-        history_get.assert_called_once()
 
     @override_settings(DIFY_API_BASE_URL="https://dify.example/v1", DIFY_API_KEY="dummy")
-    @patch("apps.agent.management.commands.evaluate_agent.services.chat")
+    @patch("apps.agent.management.commands.evaluate_agent.requests.post")
+    def test_stream_reconstructs_answer_and_captures_structured_trace(self, post):
+        events = [
+            {"event": "ping", "data": {}},
+            {"event": "workflow_started", "data": {"workflow_run_id": "workflow-1"}},
+            {"event": "node_started", "data": {"id": "node-1", "node_type": "start", "title": "Start"}},
+            {
+                "event": "node_finished",
+                "data": {
+                    "id": "node-2",
+                    "node_type": "agent",
+                    "title": "Servant Agent",
+                    "status": "succeeded",
+                    "process_data": {
+                        "tool_calls": [
+                            {
+                                "tool_name": "lookup_servant",
+                                "input": '{"servant_id": 42}',
+                                "output": {"status": 200},
+                            }
+                        ]
+                    },
+                    "outputs": {"answer": "partial"},
+                    "execution_metadata": {"duration": 1},
+                },
+            },
+            {"event": "message", "data": {"answer": "Oberon "}},
+            {"event": "message", "data": {"answer": "is a Pretender."}},
+            {"event": "not-json", "data": {}},
+            {
+                "event": "message_end",
+                "data": {
+                    "id": "message-1",
+                    "conversation_id": "conversation-1",
+                    "metadata": {"retriever_resources": []},
+                },
+            },
+        ]
+        response = Mock()
+        response.iter_lines.return_value = [
+            f"data: {json.dumps(event)}" for event in events[:6]
+        ] + [
+            "data: {broken",
+            f"data: {json.dumps(events[-1])}",
+        ]
+        post.return_value = response
+
+        result = evaluate_agent.stream_dify_chat("What is Oberon's class?")
+
+        self.assertEqual(result["answer"], "Oberon is a Pretender.")
+        self.assertEqual(result["message_id"], "message-1")
+        self.assertEqual(result["conversation_id"], "conversation-1")
+        self.assertEqual(result["workflow_run_id"], "workflow-1")
+        self.assertEqual(result["trace_source"], "stream")
+        self.assertEqual(len(result["executed_nodes"]), 2)
+        self.assertTrue(result["tool_invoked"])
+        self.assertEqual(result["tool_name"], "lookup_servant")
+        self.assertEqual(result["tool_input"], {"servant_id": 42})
+        self.assertEqual(result["tool_response_metadata"], {"status": 200})
+        self.assertFalse(result["retrieval_used"])
+        self.assertEqual(result["actual_routing"], "servant_tool")
+        post.assert_called_once_with(
+            "https://dify.example/v1/chat-messages",
+            headers={
+                "Authorization": "Bearer dummy",
+                "Content-Type": "application/json",
+            },
+            json={
+                "inputs": {},
+                "query": "What is Oberon's class?",
+                "response_mode": "streaming",
+                "user": "chaldea-agent-dev",
+            },
+            timeout=30.0,
+            stream=True,
+        )
+
+    @override_settings(DIFY_API_BASE_URL="https://dify.example/v1", DIFY_API_KEY="dummy")
+    @patch("apps.agent.management.commands.evaluate_agent.requests.post")
+    def test_stream_classifies_retrieval_both_and_none(self, post):
+        scenarios = [
+            ([{"event": "node_finished", "data": {"node_type": "knowledge-retrieval", "outputs": {"documents": [1]}}}], [{"retriever_resources": [{"name": "combat"}]}], "rag"),
+            ([{"event": "node_finished", "data": {"node_type": "knowledge-retrieval", "outputs": {"documents": [1]}}}, {"event": "node_finished", "data": {"node_type": "agent", "process_data": {"tool": "lookup_servant"}}}], [{"retriever_resources": [{"name": "combat"}]}], "both"),
+            ([], [{"retriever_resources": []}], "none"),
+        ]
+
+        for nodes, end_metadata, expected in scenarios:
+            with self.subTest(expected=expected):
+                events = nodes + [{"event": "message", "data": {"answer": "answer"}}, {"event": "message_end", "data": {"id": "message-1", "conversation_id": "conversation-1", "metadata": end_metadata[0]}}]
+                response = Mock()
+                response.iter_lines.return_value = [f"data: {json.dumps(event)}" for event in events]
+                post.return_value = response
+                result = evaluate_agent.stream_dify_chat("question")
+                self.assertEqual(result["actual_routing"], expected)
+
+    @override_settings(DIFY_API_BASE_URL="https://dify.example/v1", DIFY_API_KEY="dummy")
+    @patch("apps.agent.management.commands.evaluate_agent.requests.post")
+    def test_stream_errors_are_controlled(self, post):
+        response = Mock()
+        response.iter_lines.return_value = [
+            'data: {"event": "error", "data": {"code": "secret", "message": "private"}}'
+        ]
+        post.return_value = response
+
+        with self.assertRaisesRegex(evaluate_agent.StreamingEvaluationError, "reported an error"):
+            evaluate_agent.stream_dify_chat("question")
+
+        post.reset_mock()
+        response.iter_lines.return_value = ['data: {"event": "message", "data": {"answer": "partial"}}']
+        with self.assertRaisesRegex(evaluate_agent.StreamingEvaluationError, "before message_end"):
+            evaluate_agent.stream_dify_chat("question")
+
+    @override_settings(DIFY_API_BASE_URL="https://dify.example/v1", DIFY_API_KEY="dummy")
+    @patch("apps.agent.management.commands.evaluate_agent.stream_dify_chat")
     def test_invalid_expected_routing_fails_clearly(self, chat):
         with TemporaryDirectory() as directory:
             cases = self.write_cases(directory, cases=[
@@ -594,7 +675,7 @@ class AgentEvaluationCommandTests(TestCase):
         chat.assert_not_called()
 
     @override_settings(DIFY_API_BASE_URL="https://dify.example/v1", DIFY_API_KEY="dummy")
-    @patch("apps.agent.management.commands.evaluate_agent.services.chat")
+    @patch("apps.agent.management.commands.evaluate_agent.stream_dify_chat")
     def test_curated_scope_metadata_survives_output(self, chat):
         chat.return_value = {
             "answer": "safe",
@@ -646,7 +727,7 @@ class AgentEvaluationCommandTests(TestCase):
 
     @override_settings(DIFY_API_BASE_URL="https://dify.example/v1", DIFY_API_KEY="dummy")
     @patch("apps.agent.management.commands.evaluate_agent.time.sleep")
-    @patch("apps.agent.management.commands.evaluate_agent.services.chat")
+    @patch("apps.agent.management.commands.evaluate_agent.stream_dify_chat")
     def test_default_delay_is_zero(self, chat, sleep):
         chat.return_value = {
             "answer": "safe",
@@ -682,7 +763,7 @@ class AgentEvaluationCommandTests(TestCase):
 
     @override_settings(DIFY_API_BASE_URL="https://dify.example/v1", DIFY_API_KEY="dummy")
     @patch("apps.agent.management.commands.evaluate_agent.time.sleep")
-    @patch("apps.agent.management.commands.evaluate_agent.services.chat")
+    @patch("apps.agent.management.commands.evaluate_agent.stream_dify_chat")
     def test_custom_delay_sleeps_between_requests_not_after_final(self, chat, sleep):
         chat.return_value = {
             "answer": "safe",
@@ -730,7 +811,7 @@ class AgentEvaluationCommandTests(TestCase):
         self.assertEqual(sleep.call_args_list, [call(2.5), call(2.5)])
 
     @override_settings(DIFY_API_BASE_URL="https://dify.example/v1", DIFY_API_KEY="dummy")
-    @patch("apps.agent.management.commands.evaluate_agent.services.chat")
+    @patch("apps.agent.management.commands.evaluate_agent.stream_dify_chat")
     def test_retrieval_flag_and_experiment_label_are_recorded(self, chat):
         chat.return_value = {
             "answer": "safe",
@@ -763,7 +844,7 @@ class AgentEvaluationCommandTests(TestCase):
         self.assertEqual(payload["results"][0]["status"], "success")
 
     @override_settings(DIFY_API_BASE_URL="https://dify.example/v1", DIFY_API_KEY="dummy")
-    @patch("apps.agent.management.commands.evaluate_agent.services.chat")
+    @patch("apps.agent.management.commands.evaluate_agent.stream_dify_chat")
     def test_negative_delay_is_rejected(self, chat):
         with TemporaryDirectory() as directory:
             cases = self.write_cases(directory, cases=[
@@ -789,7 +870,7 @@ class AgentEvaluationCommandTests(TestCase):
         chat.assert_not_called()
 
     @override_settings(DIFY_API_BASE_URL="https://dify.example/v1", DIFY_API_KEY="dummy")
-    @patch("apps.agent.management.commands.evaluate_agent.services.chat")
+    @patch("apps.agent.management.commands.evaluate_agent.stream_dify_chat")
     def test_provider_failure_is_recorded_without_exception_details(self, chat):
         chat.side_effect = [
             services.AgentServiceError("private upstream body"),
@@ -844,7 +925,7 @@ class AgentEvaluationCommandTests(TestCase):
                 call_command("evaluate_agent", cases=str(cases), output=str(output))
 
     @override_settings(DIFY_API_BASE_URL="", DIFY_API_KEY="")
-    @patch("apps.agent.management.commands.evaluate_agent.services.chat")
+    @patch("apps.agent.management.commands.evaluate_agent.stream_dify_chat")
     def test_missing_configuration_fails_before_evaluation(self, chat):
         with TemporaryDirectory() as directory:
             cases = self.write_cases(directory)
@@ -856,7 +937,7 @@ class AgentEvaluationCommandTests(TestCase):
         chat.assert_not_called()
 
     @override_settings(DIFY_API_BASE_URL="https://dify.example/v1", DIFY_API_KEY="dummy")
-    @patch("apps.agent.management.commands.evaluate_agent.services.chat")
+    @patch("apps.agent.management.commands.evaluate_agent.stream_dify_chat")
     def test_existing_output_requires_explicit_overwrite(self, chat):
         chat.return_value = {"answer": "safe", "conversation_id": None, "message_id": None}
         with TemporaryDirectory() as directory:

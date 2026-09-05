@@ -368,6 +368,213 @@ def fetch_dify_message_trace(conversation_id, message_id):
     return unavailable
 
 
+class StreamingEvaluationError(Exception):
+    """Raised when an evaluation-only Dify stream cannot be completed safely."""
+
+
+def _parse_sse_tool_input(value):
+    if isinstance(value, str):
+        try:
+            return json.loads(value)
+        except (TypeError, ValueError):
+            return _sanitize_trace_text(value)
+    return value
+
+
+def _collect_tool_records(value, records=None):
+    records = records if records is not None else []
+    if isinstance(value, dict):
+        tool_name = value.get("tool_name") or value.get("tool")
+        if isinstance(tool_name, str) and tool_name.strip():
+            records.append(
+                {
+                    "tool_name": tool_name.strip(),
+                    "tool_input": _parse_sse_tool_input(
+                        value.get("tool_input", value.get("input", value.get("arguments")))
+                    ),
+                    "observation": value.get(
+                        "observation", value.get("tool_output", value.get("output"))
+                    ),
+                }
+            )
+        for item in value.values():
+            _collect_tool_records(item, records)
+    elif isinstance(value, list):
+        for item in value:
+            _collect_tool_records(item, records)
+    return records
+
+
+def _compact_node_trace(node):
+    process_data = node.get("process_data")
+    outputs = node.get("outputs")
+    execution_metadata = node.get("execution_metadata")
+    return {
+        "node_id": node.get("node_id", node.get("id")),
+        "node_type": node.get("node_type"),
+        "title": node.get("title"),
+        "status": node.get("status"),
+        "has_process_data": bool(process_data),
+        "has_outputs": bool(outputs),
+        "process_data": _redact_sensitive(process_data) if process_data else None,
+        "outputs": _redact_sensitive(outputs) if outputs else None,
+        "execution_metadata": _redact_sensitive(execution_metadata)
+        if execution_metadata
+        else None,
+    }
+
+
+def _stream_routing_metadata(node_events, message_end_metadata):
+    tool_records = []
+    retrieval_node_with_results = False
+    executed_nodes = []
+    for node in node_events:
+        executed_nodes.append(_compact_node_trace(node))
+        node_type = str(node.get("node_type") or "").lower()
+        title = str(node.get("title") or "").lower()
+        is_retrieval = "retriev" in node_type or "knowledge" in node_type or "retriev" in title
+        if is_retrieval and (node.get("outputs") or node.get("process_data")):
+            retrieval_node_with_results = True
+        for field in ("process_data", "outputs", "execution_metadata"):
+            tool_records.extend(_collect_tool_records(node.get(field)))
+
+    resources = message_end_metadata.get("retriever_resources")
+    if isinstance(resources, list):
+        retrieval_used = bool(resources)
+    elif retrieval_node_with_results:
+        retrieval_used = True
+    elif node_events:
+        retrieval_used = False
+    else:
+        retrieval_used = None
+
+    tool_invoked = bool(tool_records)
+    if tool_invoked and retrieval_used is True:
+        actual_routing = "both"
+    elif tool_invoked:
+        actual_routing = "servant_tool"
+    elif retrieval_used is True:
+        actual_routing = "rag"
+    elif retrieval_used is False:
+        actual_routing = "none"
+    else:
+        actual_routing = "unknown"
+
+    names = [item["tool_name"] for item in tool_records]
+    inputs = [_compact_trace_value(item["tool_input"]) for item in tool_records]
+    observations = [
+        _compact_trace_value(item["observation"])
+        for item in tool_records
+        if item.get("observation") is not None
+    ]
+    return {
+        "trace_status": "ok",
+        "trace_source": "stream",
+        "executed_nodes": executed_nodes,
+        "tool_invoked": tool_invoked,
+        "tool_name": names[0] if len(names) == 1 else names,
+        "tool_input": inputs[0] if len(inputs) == 1 else inputs,
+        "tool_response_metadata": observations[0]
+        if len(observations) == 1
+        else observations,
+        "retrieval_used": retrieval_used,
+        "actual_routing": actual_routing,
+    }
+
+
+def stream_dify_chat(message, conversation_id=None):
+    """Run one evaluation-only Dify streaming turn and capture structured trace."""
+    base_url = (getattr(settings, "DIFY_API_BASE_URL", "") or "").strip().rstrip("/")
+    api_key = (getattr(settings, "DIFY_API_KEY", "") or "").strip()
+    if not base_url or not api_key:
+        raise services.AgentNotConfiguredError
+
+    payload = {
+        "inputs": {},
+        "query": message,
+        "response_mode": "streaming",
+        "user": DIFY_USER,
+    }
+    if conversation_id:
+        payload["conversation_id"] = conversation_id
+
+    answer_parts = []
+    node_events = []
+    message_end = None
+    workflow_run_id = None
+    stream_error = None
+    try:
+        response = requests.post(
+            f"{base_url}/chat-messages",
+            headers={
+                "Authorization": f"Bearer {api_key}",
+                "Content-Type": "application/json",
+            },
+            json=payload,
+            timeout=getattr(settings, "DIFY_TIMEOUT_SECONDS", 30.0),
+            stream=True,
+        )
+        response.raise_for_status()
+        for raw_line in response.iter_lines(decode_unicode=True):
+            if not raw_line:
+                continue
+            if isinstance(raw_line, bytes):
+                raw_line = raw_line.decode("utf-8", errors="replace")
+            if not raw_line.startswith("data:"):
+                continue
+            raw_data = raw_line[5:].strip()
+            if not raw_data or raw_data == "[DONE]":
+                continue
+            try:
+                event = json.loads(raw_data)
+            except (TypeError, ValueError):
+                continue
+            if not isinstance(event, dict):
+                continue
+            event_name = event.get("event")
+            data = event.get("data") if isinstance(event.get("data"), dict) else {}
+            if event_name == "ping":
+                continue
+            if event_name in ("workflow_started", "workflow_finished"):
+                workflow_run_id = data.get("workflow_run_id", workflow_run_id)
+            elif event_name == "node_started":
+                node_events.append({**data, "status": "started"})
+            elif event_name == "node_finished":
+                node_events.append(data)
+                workflow_run_id = data.get("workflow_run_id", workflow_run_id)
+            elif event_name == "message":
+                chunk = data.get("answer")
+                if isinstance(chunk, str):
+                    answer_parts.append(chunk)
+            elif event_name == "message_end":
+                message_end = data
+            elif event_name == "error":
+                stream_error = True
+    except requests.Timeout as exc:
+        raise StreamingEvaluationError("Dify streaming request timed out") from exc
+    except requests.RequestException as exc:
+        raise StreamingEvaluationError("Dify streaming request failed") from exc
+
+    if stream_error:
+        raise StreamingEvaluationError("Dify streaming response reported an error")
+    if not isinstance(message_end, dict):
+        raise StreamingEvaluationError("Dify streaming response ended before message_end")
+
+    metadata = message_end.get("metadata")
+    if not isinstance(metadata, dict):
+        metadata = message_end
+    trace = _stream_routing_metadata(node_events, metadata)
+    trace.update(
+        {
+            "answer": "".join(answer_parts),
+            "conversation_id": message_end.get("conversation_id"),
+            "message_id": message_end.get("id", message_end.get("message_id")),
+            "workflow_run_id": workflow_run_id,
+        }
+    )
+    return trace
+
+
 class Command(BaseCommand):
     help = "Record raw Agent answers for the version-controlled evaluation cases."
 
@@ -449,6 +656,9 @@ class Command(BaseCommand):
                 "routing_match": False,
                 "retrieval_used": None,
                 "trace_status": "unavailable",
+                "trace_source": "stream",
+                "workflow_run_id": None,
+                "executed_nodes": [],
             }
             if "authority_scope" in case:
                 record["authority_scope"] = case["authority_scope"]
@@ -457,7 +667,7 @@ class Command(BaseCommand):
                     "expected_scope_behavior"
                 ]
             try:
-                provider_result = services.chat(
+                provider_result = stream_dify_chat(
                     case["question"], conversation_id=conversation_id
                 )
                 answer, returned_conversation_id, message_id = safe_result(
@@ -472,15 +682,28 @@ class Command(BaseCommand):
                         "message_id": message_id,
                     }
                 )
-                trace = fetch_dify_message_trace(
-                    returned_conversation_id,
-                    message_id,
+                record.update(
+                    {
+                        key: provider_result[key]
+                        for key in (
+                            "trace_status",
+                            "trace_source",
+                            "workflow_run_id",
+                            "executed_nodes",
+                            "tool_invoked",
+                            "tool_name",
+                            "tool_input",
+                            "tool_response_metadata",
+                            "retrieval_used",
+                            "actual_routing",
+                        )
+                        if key in provider_result
+                    }
                 )
-                record.update(trace)
                 expected_routing = record["expected_routing"]
                 record["routing_match"] = (
                     expected_routing is not None
-                    and trace["actual_routing"] == expected_routing
+                    and record["actual_routing"] == expected_routing
                 )
                 if group and returned_conversation_id:
                     group_conversations[group] = returned_conversation_id
@@ -488,6 +711,17 @@ class Command(BaseCommand):
                 raise CommandError(
                     "Agent provider became unconfigured during evaluation."
                 ) from exc
+            except StreamingEvaluationError:
+                record.update(
+                    {
+                        "status": "error",
+                        "success": False,
+                        "error": {
+                            "code": "agent_stream_error",
+                            "message": "Agent streaming evaluation failed.",
+                        },
+                    }
+                )
             except Exception:
                 record.update(
                     {
