@@ -381,8 +381,10 @@ class AgentEvaluationCommandTests(TestCase):
         self.assertIn("elapsed_seconds", payload["results"][0])
         self.assertTrue(payload["results"][0]["success"])
         self.assertIsNone(payload["results"][0]["tool_invoked"])
+        self.assertIsNone(payload["results"][0]["expected_tool_invoked"])
         self.assertEqual(payload["results"][0]["actual_routing"], "unknown")
         self.assertFalse(payload["results"][0]["routing_match"])
+        self.assertFalse(payload["results"][0]["tool_routing_match"])
         self.assertNotIn("dummy", output_text)
 
     @override_settings(DIFY_API_BASE_URL="https://dify.example/v1", DIFY_API_KEY="dummy")
@@ -428,6 +430,8 @@ class AgentEvaluationCommandTests(TestCase):
         self.assertEqual(result["tool_response_metadata"], {"status": 200})
         self.assertFalse(result["retrieval_used"])
         self.assertEqual(result["actual_routing"], "servant_tool")
+        self.assertTrue(result["expected_tool_invoked"])
+        self.assertTrue(result["tool_routing_match"])
         self.assertTrue(result["routing_match"])
         self.assertNotIn("private-key", output_text)
 
@@ -557,12 +561,23 @@ class AgentEvaluationCommandTests(TestCase):
                         "tool_calls": [
                             {
                                 "tool_name": "lookup_servant",
+                                "tool_call_id": "call-1",
                                 "input": '{"servant_id": 42}',
                                 "output": {"status": 200},
                             }
                         ]
                     },
-                    "outputs": {"answer": "partial"},
+                    "outputs": {
+                        "answer": "partial",
+                        "tool_calls": [
+                            {
+                                "tool_name": "lookup_servant",
+                                "tool_call_id": "call-1",
+                                "input": '{"servant_id": 42}',
+                                "output": {"status": 200},
+                            }
+                        ],
+                    },
                     "execution_metadata": {"duration": 1},
                 },
             },
@@ -617,12 +632,135 @@ class AgentEvaluationCommandTests(TestCase):
             stream=True,
         )
 
+    def test_stream_deduplicates_tools_and_compacts_nodes(self):
+        node = {
+            "id": "node-2",
+            "node_type": "agent",
+            "title": "Servant Agent",
+            "status": "succeeded",
+            "process_data": {
+                "reasoning": "private reasoning should not be stored",
+                "tool_calls": [
+                    {
+                        "tool_name": "lookup_servant",
+                        "tool_call_id": "call-1",
+                        "input": '{"servant_id": 42}',
+                        "output": {
+                            "status": 200,
+                            "answer": "private tool payload",
+                        },
+                    }
+                ],
+            },
+            "outputs": {
+                "tool_calls": [
+                    {
+                        "tool_name": "lookup_servant",
+                        "tool_call_id": "call-1",
+                        "input": '{"servant_id": 42}',
+                        "output": {
+                            "status": 200,
+                            "answer": "private tool payload",
+                        },
+                    }
+                ]
+            },
+            "execution_metadata": {"reasoning": "private execution details"},
+        }
+
+        trace = evaluate_agent._stream_routing_metadata([node], {})
+
+        self.assertTrue(trace["tool_invoked"])
+        self.assertEqual(trace["tool_name"], "lookup_servant")
+        self.assertEqual(trace["tool_input"], {"servant_id": 42})
+        self.assertEqual(trace["tool_response_metadata"], {"status": 200})
+        compact = trace["executed_nodes"][0]
+        self.assertEqual(compact["tool_call_count"], 1)
+        self.assertTrue(compact["has_process_data"])
+        self.assertTrue(compact["has_outputs"])
+        self.assertNotIn("process_data", compact)
+        self.assertNotIn("outputs", compact)
+        self.assertNotIn("execution_metadata", compact)
+        trace_text = json.dumps(trace, ensure_ascii=False)
+        self.assertNotIn("reasoning", trace_text)
+        self.assertNotIn("private tool payload", trace_text)
+
+    @override_settings(DIFY_API_BASE_URL="https://dify.example/v1", DIFY_API_KEY="dummy")
+    @patch("apps.agent.management.commands.evaluate_agent.stream_dify_chat")
+    def test_tool_routing_match_uses_expected_tool_invocation(self, chat):
+        cases = [
+            {
+                "id": "servant-both",
+                "category": "out_of_scope_structured_fact",
+                "question": "Oberon rarity",
+                "source": "tool",
+                "expected_facts": [],
+                "forbidden_claims": [],
+                "expected_routing": "servant_tool",
+            },
+            {
+                "id": "servant-missed",
+                "category": "out_of_scope_structured_fact",
+                "question": "Oberon class",
+                "source": "tool",
+                "expected_facts": [],
+                "forbidden_claims": [],
+                "expected_routing": "servant_tool",
+            },
+            {
+                "id": "rag-none",
+                "category": "knowledge_hit",
+                "question": "What is Mighty Chain?",
+                "source": "rag",
+                "expected_facts": [],
+                "forbidden_claims": [],
+                "expected_routing": "rag",
+            },
+            {
+                "id": "rag-tool",
+                "category": "knowledge_hit",
+                "question": "Explain 3T farming",
+                "source": "rag",
+                "expected_facts": [],
+                "forbidden_claims": [],
+                "expected_routing": "rag",
+            },
+            {
+                "id": "both-both",
+                "category": "knowledge_hit",
+                "question": "Oberon and farming",
+                "source": "both",
+                "expected_facts": [],
+                "forbidden_claims": [],
+                "expected_routing": "both",
+            },
+        ]
+        chat.side_effect = [
+            {"answer": "ok", "conversation_id": None, "message_id": None, "tool_invoked": True, "actual_routing": "both"},
+            {"answer": "ok", "conversation_id": None, "message_id": None, "tool_invoked": False, "actual_routing": "none"},
+            {"answer": "ok", "conversation_id": None, "message_id": None, "tool_invoked": False, "actual_routing": "none"},
+            {"answer": "ok", "conversation_id": None, "message_id": None, "tool_invoked": True, "actual_routing": "both"},
+            {"answer": "ok", "conversation_id": None, "message_id": None, "tool_invoked": True, "actual_routing": "both"},
+        ]
+        with TemporaryDirectory() as directory:
+            case_path = self.write_cases(directory, cases=cases)
+            output = Path(directory) / "routing.json"
+            call_command("evaluate_agent", cases=str(case_path), output=str(output))
+            results = json.loads(output.read_text(encoding="utf-8"))["results"]
+
+        self.assertEqual(
+            [(item["expected_tool_invoked"], item["tool_routing_match"]) for item in results],
+            [(True, True), (True, False), (False, True), (False, False), (True, True)],
+        )
+        self.assertEqual(results[0]["actual_routing"], "both")
+        self.assertFalse(results[0]["routing_match"])
+
     @override_settings(DIFY_API_BASE_URL="https://dify.example/v1", DIFY_API_KEY="dummy")
     @patch("apps.agent.management.commands.evaluate_agent.requests.post")
     def test_stream_classifies_retrieval_both_and_none(self, post):
         scenarios = [
             ([{"event": "node_finished", "data": {"node_type": "knowledge-retrieval", "outputs": {"documents": [1]}}}], [{"retriever_resources": [{"name": "combat"}]}], "rag"),
-            ([{"event": "node_finished", "data": {"node_type": "knowledge-retrieval", "outputs": {"documents": [1]}}}, {"event": "node_finished", "data": {"node_type": "agent", "process_data": {"tool": "lookup_servant"}}}], [{"retriever_resources": [{"name": "combat"}]}], "both"),
+            ([{"event": "node_finished", "data": {"node_type": "knowledge-retrieval", "outputs": {"documents": [1]}}}, {"event": "node_finished", "data": {"node_type": "agent", "process_data": {"tool": "lookup_servant"}}}], [{"retriever_resources": []}], "both"),
             ([], [{"retriever_resources": []}], "none"),
         ]
 

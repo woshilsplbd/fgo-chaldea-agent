@@ -34,7 +34,7 @@ From `v2/`, using the project environment:
   --output D:\pyweb\chaldea-reports\phase15b-rag-baseline.json
 ```
 
-The output path is explicit and should remain outside Git. Existing output is never overwritten unless `--overwrite` is supplied. The command calls only `apps.agent.services.chat()`; it does not call Dify directly and does not write credentials, headers, raw provider payloads, or automatic scores.
+The output path is explicit and should remain outside Git. Existing output is never overwritten unless `--overwrite` is supplied. The evaluator uses its evaluation-only streaming adapter to capture execution metadata; the production Agent API continues to use `apps.agent.services.chat()`. It does not write credentials, headers, raw provider payloads, or automatic scores.
 
 ## Experiment metadata and pacing
 
@@ -81,10 +81,19 @@ output path outside Git:
   --experiment-label tool-routing-v1
 ```
 
-Routing expectations are case metadata (`servant_tool`, `rag`, or `both`).
-The runner records `expected_routing`, `actual_routing`, `routing_match`,
-`tool_invoked`, tool name/input/response metadata, retrieval metadata, final
-answer, status, success, `elapsed_seconds`/`latency_seconds`, and sanitized
-error details when the provider supplies them. It does not judge factual answer quality or infer
+Routing expectations are case metadata (`servant_tool`, `rag`, or `both`). The
+current Chatflow runs Knowledge Retrieval before the Agent for every query, so
+the physical `actual_routing` may be `both` even for a structured servant
+question. The primary deterministic metric is `tool_routing_match`: it compares
+the expected `expected_tool_invoked` value (`true` for `servant_tool`/`both`,
+`false` for `rag`) with the observed `tool_invoked` value. The legacy
+`routing_match` field remains an exclusive-source comparison for backward
+compatibility and should not be used as the primary metric. The runner records
+both routing fields, tool name/input/response metadata, retrieval metadata,
+compact executed-node summaries, final answer, status, success,
+`elapsed_seconds`/`latency_seconds`, and sanitized error details when the
+provider supplies them. Duplicate Tool traces are collapsed by `tool_call_id`
+or by deterministic tool name/input identity, and reasoning or full execution
+payloads are not persisted. It does not judge factual answer quality or infer
 routing from answer text. If the provider supplies no routing metadata,
-`actual_routing` is `unknown` and the routing match is `false`.
+`actual_routing` is `unknown` and both routing checks are `false`.

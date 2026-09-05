@@ -36,6 +36,14 @@ REQUIRED_CASE_FIELDS = {
 }
 
 
+def _expected_tool_invoked(expected_routing):
+    if expected_routing in ("servant_tool", "both"):
+        return True
+    if expected_routing == "rag":
+        return False
+    return None
+
+
 def load_cases(path):
     try:
         payload = json.loads(path.read_text(encoding="utf-8"))
@@ -227,7 +235,7 @@ def routing_metadata(result):
         result.get("actual_routing"),
         metadata.get("actual_routing"),
     )
-    if actual_routing not in SUPPORTED_ROUTINGS:
+    if actual_routing not in SUPPORTED_ROUTINGS | {"none", "unknown"}:
         if tool_invoked is True and retrieval_used is True:
             actual_routing = "both"
         elif tool_invoked is True:
@@ -257,13 +265,13 @@ def _sanitize_trace_text(value, limit=2000):
     return text[:limit]
 
 
-def _compact_trace_value(value):
+def _compact_trace_value(value, limit=2000):
     if isinstance(value, dict):
         return _redact_sensitive(value)
     if isinstance(value, list):
-        return [_compact_trace_value(item) for item in value]
+        return [_compact_trace_value(item, limit=limit) for item in value]
     if isinstance(value, str):
-        return _sanitize_trace_text(value)
+        return _sanitize_trace_text(value, limit=limit)
     return value
 
 
@@ -389,6 +397,7 @@ def _collect_tool_records(value, records=None):
             records.append(
                 {
                     "tool_name": tool_name.strip(),
+                    "tool_call_id": value.get("tool_call_id", value.get("id")),
                     "tool_input": _parse_sse_tool_input(
                         value.get("tool_input", value.get("input", value.get("arguments")))
                     ),
@@ -405,23 +414,63 @@ def _collect_tool_records(value, records=None):
     return records
 
 
-def _compact_node_trace(node):
+def _result_count(value):
+    if isinstance(value, list):
+        return len(value)
+    if isinstance(value, dict):
+        for key in ("documents", "results", "retriever_resources", "records"):
+            if isinstance(value.get(key), list):
+                return len(value[key])
+    return None
+
+
+def _compact_tool_observation(value):
+    if isinstance(value, dict):
+        selected = {}
+        for key in ("ok", "status", "status_code", "code", "message", "error"):
+            if key in value:
+                selected[key] = _compact_trace_value(value[key])
+        return selected or {"keys": sorted(str(key) for key in value)[:20]}
+    return _compact_trace_value(value, limit=500)
+
+
+def _compact_node_trace(node, tool_call_count=0, retrieval_result_count=None):
     process_data = node.get("process_data")
     outputs = node.get("outputs")
-    execution_metadata = node.get("execution_metadata")
-    return {
+    compact = {
         "node_id": node.get("node_id", node.get("id")),
         "node_type": node.get("node_type"),
         "title": node.get("title"),
         "status": node.get("status"),
         "has_process_data": bool(process_data),
         "has_outputs": bool(outputs),
-        "process_data": _redact_sensitive(process_data) if process_data else None,
-        "outputs": _redact_sensitive(outputs) if outputs else None,
-        "execution_metadata": _redact_sensitive(execution_metadata)
-        if execution_metadata
-        else None,
+        "tool_call_count": tool_call_count,
     }
+    if retrieval_result_count is not None:
+        compact["retrieval_result_count"] = retrieval_result_count
+    return compact
+
+
+def _deduplicate_tool_records(records):
+    unique = []
+    seen = set()
+    for record in records:
+        tool_call_id = record.get("tool_call_id")
+        if tool_call_id is not None and str(tool_call_id).strip():
+            identity = ("id", str(tool_call_id).strip())
+        else:
+            try:
+                serialized_input = json.dumps(
+                    record.get("tool_input"), ensure_ascii=False, sort_keys=True
+                )
+            except (TypeError, ValueError):
+                serialized_input = repr(record.get("tool_input"))
+            identity = ("value", record.get("tool_name"), serialized_input)
+        if identity in seen:
+            continue
+        seen.add(identity)
+        unique.append(record)
+    return unique
 
 
 def _stream_routing_metadata(node_events, message_end_metadata):
@@ -429,18 +478,30 @@ def _stream_routing_metadata(node_events, message_end_metadata):
     retrieval_node_with_results = False
     executed_nodes = []
     for node in node_events:
-        executed_nodes.append(_compact_node_trace(node))
         node_type = str(node.get("node_type") or "").lower()
         title = str(node.get("title") or "").lower()
         is_retrieval = "retriev" in node_type or "knowledge" in node_type or "retriev" in title
-        if is_retrieval and (node.get("outputs") or node.get("process_data")):
-            retrieval_node_with_results = True
+        node_tools = []
         for field in ("process_data", "outputs", "execution_metadata"):
-            tool_records.extend(_collect_tool_records(node.get(field)))
+            node_tools.extend(_collect_tool_records(node.get(field)))
+        node_tools = _deduplicate_tool_records(node_tools)
+        node_result_count = _result_count(node.get("outputs"))
+        if is_retrieval and node_result_count:
+            retrieval_node_with_results = True
+        tool_records.extend(node_tools)
+        executed_nodes.append(
+            _compact_node_trace(
+                node,
+                tool_call_count=len(node_tools),
+                retrieval_result_count=node_result_count if is_retrieval else None,
+            )
+        )
+
+    tool_records = _deduplicate_tool_records(tool_records)
 
     resources = message_end_metadata.get("retriever_resources")
     if isinstance(resources, list):
-        retrieval_used = bool(resources)
+        retrieval_used = bool(resources) or retrieval_node_with_results
     elif retrieval_node_with_results:
         retrieval_used = True
     elif node_events:
@@ -463,7 +524,7 @@ def _stream_routing_metadata(node_events, message_end_metadata):
     names = [item["tool_name"] for item in tool_records]
     inputs = [_compact_trace_value(item["tool_input"]) for item in tool_records]
     observations = [
-        _compact_trace_value(item["observation"])
+        _compact_tool_observation(item["observation"])
         for item in tool_records
         if item.get("observation") is not None
     ]
@@ -652,8 +713,12 @@ class Command(BaseCommand):
                 "tool_input": None,
                 "tool_response_metadata": None,
                 "expected_routing": case.get("expected_routing"),
+                "expected_tool_invoked": _expected_tool_invoked(
+                    case.get("expected_routing")
+                ),
                 "actual_routing": "unknown",
                 "routing_match": False,
+                "tool_routing_match": False,
                 "retrieval_used": None,
                 "trace_status": "unavailable",
                 "trace_source": "stream",
@@ -704,6 +769,12 @@ class Command(BaseCommand):
                 record["routing_match"] = (
                     expected_routing is not None
                     and record["actual_routing"] == expected_routing
+                )
+                expected_tool_invoked = record["expected_tool_invoked"]
+                record["tool_routing_match"] = (
+                    expected_tool_invoked is not None
+                    and record["tool_invoked"] is not None
+                    and record["tool_invoked"] == expected_tool_invoked
                 )
                 if group and returned_conversation_id:
                     group_conversations[group] = returned_conversation_id
