@@ -21,6 +21,7 @@ SUPPORTED_AUTHORITY_SCOPES = {
     "ARCHIVE_EDITORIAL",
     "STRUCTURED_TOOL_BOUNDARY",
 }
+SUPPORTED_ROUTINGS = {"servant_tool", "rag", "both"}
 REQUIRED_CASE_FIELDS = {
     "id",
     "category",
@@ -94,6 +95,11 @@ def load_cases(path):
             raise CommandError(
                 f"case {case_id} expected_scope_behavior must be a non-empty string"
             )
+        expected_routing = case.get("expected_routing")
+        if expected_routing is not None and expected_routing not in SUPPORTED_ROUTINGS:
+            raise CommandError(
+                f"case {case_id} has unsupported expected_routing: {expected_routing}"
+            )
 
         group = case.get("conversation_group")
         turn = case.get("turn")
@@ -134,6 +140,107 @@ def safe_result(result):
     if message_id is not None and not isinstance(message_id, str):
         raise services.AgentServiceError("provider result had an invalid message ID")
     return answer, conversation_id, message_id
+
+
+def _first_value(*values):
+    for value in values:
+        if value is not None:
+            return value
+    return None
+
+
+def _redact_sensitive(value):
+    if isinstance(value, dict):
+        redacted = {}
+        for key, item in value.items():
+            key_text = str(key).lower()
+            if any(marker in key_text for marker in ("key", "token", "secret", "authorization")):
+                redacted[key] = "[redacted]"
+            else:
+                redacted[key] = _redact_sensitive(item)
+        return redacted
+    if isinstance(value, list):
+        return [_redact_sensitive(item) for item in value]
+    return value
+
+
+def routing_metadata(result):
+    routing = result.get("routing") if isinstance(result.get("routing"), dict) else {}
+    metadata = result.get("metadata") if isinstance(result.get("metadata"), dict) else {}
+    tool_calls = _first_value(
+        routing.get("tool_calls"),
+        result.get("tool_calls"),
+        metadata.get("tool_calls"),
+    )
+    first_tool_call = tool_calls[0] if isinstance(tool_calls, list) and tool_calls else {}
+    if not isinstance(first_tool_call, dict):
+        first_tool_call = {}
+
+    tool_invoked = _first_value(
+        routing.get("tool_invoked"),
+        result.get("tool_invoked"),
+        metadata.get("tool_invoked"),
+    )
+    if not isinstance(tool_invoked, bool):
+        tool_invoked = bool(tool_calls) if isinstance(tool_calls, list) else None
+
+    tool_name = _first_value(
+        routing.get("tool_name"),
+        result.get("tool_name"),
+        metadata.get("tool_name"),
+        first_tool_call.get("tool_name"),
+        first_tool_call.get("name"),
+    )
+    tool_input = _first_value(
+        routing.get("tool_input"),
+        result.get("tool_input"),
+        metadata.get("tool_input"),
+        first_tool_call.get("tool_input"),
+        first_tool_call.get("input"),
+        first_tool_call.get("arguments"),
+    )
+    tool_response_metadata = _first_value(
+        routing.get("tool_response_metadata"),
+        result.get("tool_response_metadata"),
+        metadata.get("tool_response_metadata"),
+        first_tool_call.get("tool_response_metadata"),
+        first_tool_call.get("response_metadata"),
+    )
+    retrieval_used = _first_value(
+        routing.get("retrieval_used"),
+        result.get("retrieval_used"),
+        metadata.get("retrieval_used"),
+    )
+    if not isinstance(retrieval_used, bool):
+        retriever_resources = metadata.get("retriever_resources")
+        if isinstance(retriever_resources, list):
+            retrieval_used = bool(retriever_resources)
+        else:
+            retrieval_used = None
+
+    actual_routing = _first_value(
+        routing.get("actual_routing"),
+        result.get("actual_routing"),
+        metadata.get("actual_routing"),
+    )
+    if actual_routing not in SUPPORTED_ROUTINGS:
+        if tool_invoked is True and retrieval_used is True:
+            actual_routing = "both"
+        elif tool_invoked is True:
+            actual_routing = "servant_tool"
+        elif retrieval_used is True:
+            actual_routing = "rag"
+        else:
+            actual_routing = "unknown"
+
+    return {
+        "tool_invoked": tool_invoked,
+        "tool_name": tool_name,
+        "tool_input": _redact_sensitive(tool_input),
+        "tool_response_metadata": _redact_sensitive(tool_response_metadata),
+        "retrieval_used": retrieval_used,
+        "actual_routing": actual_routing,
+    }
 
 
 class Command(BaseCommand):
@@ -206,6 +313,16 @@ class Command(BaseCommand):
                 "conversation_id": None,
                 "message_id": None,
                 "elapsed_seconds": None,
+                "latency_seconds": None,
+                "success": False,
+                "tool_invoked": None,
+                "tool_name": None,
+                "tool_input": None,
+                "tool_response_metadata": None,
+                "expected_routing": case.get("expected_routing"),
+                "actual_routing": "unknown",
+                "routing_match": False,
+                "retrieval_used": None,
             }
             if "authority_scope" in case:
                 record["authority_scope"] = case["authority_scope"]
@@ -223,10 +340,18 @@ class Command(BaseCommand):
                 record.update(
                     {
                         "status": "success",
+                        "success": True,
                         "answer": answer,
                         "conversation_id": returned_conversation_id,
                         "message_id": message_id,
                     }
+                )
+                routing = routing_metadata(provider_result)
+                record.update(routing)
+                expected_routing = record["expected_routing"]
+                record["routing_match"] = (
+                    expected_routing is not None
+                    and routing["actual_routing"] == expected_routing
                 )
                 if group and returned_conversation_id:
                     group_conversations[group] = returned_conversation_id
@@ -238,6 +363,7 @@ class Command(BaseCommand):
                 record.update(
                     {
                         "status": "error",
+                        "success": False,
                         "error": {
                             "code": "agent_service_error",
                             "message": "Agent service failed for this case.",
@@ -245,9 +371,8 @@ class Command(BaseCommand):
                     }
                 )
             finally:
-                record["elapsed_seconds"] = round(
-                    time.perf_counter() - started, 6
-                )
+                record["elapsed_seconds"] = round(time.perf_counter() - started, 6)
+                record["latency_seconds"] = record["elapsed_seconds"]
             results.append(record)
 
         output = {

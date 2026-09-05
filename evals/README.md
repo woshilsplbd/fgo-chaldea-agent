@@ -64,3 +64,27 @@ Example curated POST-RAG run with explicit pacing:
   --experiment-label curated-v1-post-rag \
   --delay-seconds 7
 ```
+
+## Tool-routing evaluation
+
+`tool_routing_cases_v1.json` is a small curated set for checking whether the
+Agent routes structured Servant facts to `lookup_servant`, general FGO
+knowledge to RAG, and boundary questions to the appropriate combination or
+controlled outcome. Run it with the same `evaluate_agent` command and an
+output path outside Git:
+
+```text
+..\.venv\Scripts\python.exe manage.py evaluate_agent \
+  --cases evals/tool_routing_cases_v1.json \
+  --output D:\pyweb\chaldea-reports\tool-routing-v1.json \
+  --retrieval-used \
+  --experiment-label tool-routing-v1
+```
+
+Routing expectations are case metadata (`servant_tool`, `rag`, or `both`).
+The runner records `expected_routing`, `actual_routing`, `routing_match`,
+`tool_invoked`, tool name/input/response metadata, retrieval metadata, final
+answer, status, success, `elapsed_seconds`/`latency_seconds`, and sanitized
+error details when the provider supplies them. It does not judge factual answer quality or infer
+routing from answer text. If the provider supplies no routing metadata,
+`actual_routing` is `unknown` and the routing match is `false`.

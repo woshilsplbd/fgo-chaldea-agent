@@ -1,0 +1,101 @@
+[
+  {
+    "id": "routing-tool-001",
+    "category": "out_of_scope_structured_fact",
+    "question": "What is Oberon's rarity?",
+    "source": "Structured Servant Tool: lookup_servant",
+    "expected_facts": ["Oberon's current rarity is structured Servant data."],
+    "forbidden_claims": ["Guessing a rarity without using structured Servant data."],
+    "expected_routing": "servant_tool"
+  },
+  {
+    "id": "routing-tool-002",
+    "category": "out_of_scope_structured_fact",
+    "question": "What class is Oberon?",
+    "source": "Structured Servant Tool: lookup_servant",
+    "expected_facts": ["Oberon's class is a structured Servant fact."],
+    "forbidden_claims": ["Treating a prose RAG answer as the authoritative class record."],
+    "expected_routing": "servant_tool"
+  },
+  {
+    "id": "routing-tool-003",
+    "category": "out_of_scope_structured_fact",
+    "question": "What skills does Oberon have?",
+    "source": "Structured Servant Tool: lookup_servant",
+    "expected_facts": ["Oberon's skill list is structured Servant data."],
+    "forbidden_claims": ["Inventing skill names or effects."],
+    "expected_routing": "servant_tool"
+  },
+  {
+    "id": "routing-tool-004",
+    "category": "out_of_scope_structured_fact",
+    "question": "Look up Servant ID 42 and identify the servant.",
+    "source": "Structured Servant Tool: lookup_servant",
+    "expected_facts": ["An exact structured servant_id lookup is required."],
+    "forbidden_claims": ["Using an unrelated prose explanation instead of the structured lookup."],
+    "expected_routing": "servant_tool"
+  },
+  {
+    "id": "routing-rag-001",
+    "category": "knowledge_hit",
+    "question": "What cards make a Mighty Chain and what does it provide?",
+    "source": "combat_mechanics.md — Mighty Chain",
+    "expected_facts": ["Mighty Chain uses Quick, Arts, and Buster cards and grants their first-card effects."],
+    "forbidden_claims": ["Calling the Servant Tool for a general combat mechanic."],
+    "expected_routing": "rag"
+  },
+  {
+    "id": "routing-rag-002",
+    "category": "knowledge_hit",
+    "question": "What does 3T farming mean in the archive strategy notes?",
+    "source": "strategy_guide.md — 周回攻略",
+    "expected_facts": ["3T farming describes a three-turn repeated-clear strategy goal."],
+    "forbidden_claims": ["Treating editorial strategy as a structured servant lookup."],
+    "expected_routing": "rag"
+  },
+  {
+    "id": "routing-rag-003",
+    "category": "knowledge_hit",
+    "question": "How do the three Command Card types generally work?",
+    "source": "combat_mechanics.md — 三种指令卡详解",
+    "expected_facts": ["Quick, Arts, and Buster have distinct high-level effects."],
+    "forbidden_claims": ["Calling the Servant Tool for general Command Card mechanics."],
+    "expected_routing": "rag"
+  },
+  {
+    "id": "routing-rag-004",
+    "category": "knowledge_hit",
+    "question": "How does the archive describe Chaldea's mission?",
+    "source": "world_setting.md — 人理续存保障机构 · 迦勒底",
+    "expected_facts": ["The archive describes Chaldea's historical mission and role."],
+    "forbidden_claims": ["Calling the Servant Tool for world-setting knowledge."],
+    "expected_routing": "rag"
+  },
+  {
+    "id": "routing-boundary-001",
+    "category": "out_of_scope_structured_fact",
+    "question": "Which servant does the name Artoria refer to?",
+    "source": "Structured Servant Tool: lookup_servant",
+    "expected_facts": [],
+    "forbidden_claims": ["Silently choosing one result when Atlas returns multiple plausible candidates."],
+    "expected_routing": "servant_tool"
+  },
+  {
+    "id": "routing-boundary-002",
+    "category": "out_of_scope_structured_fact",
+    "question": "What are the details for the unknown servant NotARealServant?",
+    "source": "Structured Servant Tool: lookup_servant",
+    "expected_facts": [],
+    "forbidden_claims": ["Inventing a servant record when lookup returns no candidate."],
+    "expected_routing": "servant_tool"
+  },
+  {
+    "id": "routing-boundary-003",
+    "category": "retrieval_discrimination",
+    "question": "What is Oberon's class, and how does a Mighty Chain work?",
+    "source": "Structured Servant Tool plus combat_mechanics.md — Mighty Chain",
+    "expected_facts": ["The servant fact requires structured lookup; the general mechanic belongs to knowledge retrieval."],
+    "forbidden_claims": ["Answering both parts from only one routing source."],
+    "expected_routing": "both"
+  }
+]

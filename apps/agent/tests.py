@@ -378,7 +378,76 @@ class AgentEvaluationCommandTests(TestCase):
         self.assertEqual(payload["results"][1]["source"], "source-2")
         self.assertEqual(payload["results"][0]["status"], "success")
         self.assertIn("elapsed_seconds", payload["results"][0])
+        self.assertTrue(payload["results"][0]["success"])
+        self.assertIsNone(payload["results"][0]["tool_invoked"])
+        self.assertEqual(payload["results"][0]["actual_routing"], "unknown")
+        self.assertFalse(payload["results"][0]["routing_match"])
         self.assertNotIn("dummy", output_text)
+
+    @override_settings(DIFY_API_BASE_URL="https://dify.example/v1", DIFY_API_KEY="dummy")
+    @patch("apps.agent.management.commands.evaluate_agent.services.chat")
+    def test_runner_records_routing_metadata_and_redacts_secrets(self, chat):
+        chat.return_value = {
+            "answer": "Oberon is a Pretender.",
+            "conversation_id": None,
+            "message_id": "message-1",
+            "routing": {
+                "tool_invoked": True,
+                "tool_name": "lookup_servant",
+                "tool_input": {"servant_id": 42, "api_key": "private-key"},
+                "tool_response_metadata": {"status": 200},
+                "retrieval_used": False,
+            },
+        }
+        with TemporaryDirectory() as directory:
+            cases = self.write_cases(directory, cases=[
+                {
+                    "id": "tool-route",
+                    "category": "out_of_scope_structured_fact",
+                    "question": "What is Oberon's class?",
+                    "source": "servant tool",
+                    "expected_facts": [],
+                    "forbidden_claims": [],
+                    "expected_routing": "servant_tool",
+                }
+            ])
+            output = Path(directory) / "results.json"
+            call_command("evaluate_agent", cases=str(cases), output=str(output))
+            output_text = output.read_text(encoding="utf-8")
+            result = json.loads(output_text)["results"][0]
+
+        self.assertTrue(result["success"])
+        self.assertTrue(result["tool_invoked"])
+        self.assertEqual(result["tool_name"], "lookup_servant")
+        self.assertEqual(result["tool_input"]["servant_id"], 42)
+        self.assertEqual(result["tool_input"]["api_key"], "[redacted]")
+        self.assertEqual(result["tool_response_metadata"], {"status": 200})
+        self.assertFalse(result["retrieval_used"])
+        self.assertEqual(result["actual_routing"], "servant_tool")
+        self.assertTrue(result["routing_match"])
+        self.assertNotIn("private-key", output_text)
+
+    @override_settings(DIFY_API_BASE_URL="https://dify.example/v1", DIFY_API_KEY="dummy")
+    @patch("apps.agent.management.commands.evaluate_agent.services.chat")
+    def test_invalid_expected_routing_fails_clearly(self, chat):
+        with TemporaryDirectory() as directory:
+            cases = self.write_cases(directory, cases=[
+                {
+                    "id": "invalid-route",
+                    "category": "knowledge_hit",
+                    "question": "question",
+                    "source": "source",
+                    "expected_facts": [],
+                    "forbidden_claims": [],
+                    "expected_routing": "guess",
+                }
+            ])
+            output = Path(directory) / "results.json"
+
+            with self.assertRaisesRegex(CommandError, "expected_routing"):
+                call_command("evaluate_agent", cases=str(cases), output=str(output))
+
+        chat.assert_not_called()
 
     @override_settings(DIFY_API_BASE_URL="https://dify.example/v1", DIFY_API_KEY="dummy")
     @patch("apps.agent.management.commands.evaluate_agent.services.chat")
