@@ -428,6 +428,7 @@ class AgentEvaluationCommandTests(TestCase):
         self.assertEqual(result["tool_input"]["servant_id"], 42)
         self.assertEqual(result["tool_input"]["api_key"], "[redacted]")
         self.assertEqual(result["tool_response_metadata"], {"status": 200})
+        self.assertEqual(result["actual_tools"], ["lookup_servant"])
         self.assertFalse(result["retrieval_used"])
         self.assertEqual(result["actual_routing"], "servant_tool")
         self.assertTrue(result["expected_tool_invoked"])
@@ -613,7 +614,11 @@ class AgentEvaluationCommandTests(TestCase):
         self.assertTrue(result["tool_invoked"])
         self.assertEqual(result["tool_name"], "lookup_servant")
         self.assertEqual(result["tool_input"], {"servant_id": 42})
-        self.assertEqual(result["tool_response_metadata"], {"status": 200})
+        self.assertEqual(
+            result["tool_response_metadata"],
+            {"tool_call_id": "call-1", "status": 200},
+        )
+        self.assertEqual(result["actual_tools"], ["lookup_servant"])
         self.assertFalse(result["retrieval_used"])
         self.assertEqual(result["actual_routing"], "servant_tool")
         post.assert_called_once_with(
@@ -673,7 +678,11 @@ class AgentEvaluationCommandTests(TestCase):
         self.assertTrue(trace["tool_invoked"])
         self.assertEqual(trace["tool_name"], "lookup_servant")
         self.assertEqual(trace["tool_input"], {"servant_id": 42})
-        self.assertEqual(trace["tool_response_metadata"], {"status": 200})
+        self.assertEqual(
+            trace["tool_response_metadata"],
+            {"tool_call_id": "call-1", "status": 200},
+        )
+        self.assertEqual(trace["actual_tools"], ["lookup_servant"])
         compact = trace["executed_nodes"][0]
         self.assertEqual(compact["tool_call_count"], 1)
         self.assertTrue(compact["has_process_data"])
@@ -736,11 +745,11 @@ class AgentEvaluationCommandTests(TestCase):
             },
         ]
         chat.side_effect = [
-            {"answer": "ok", "conversation_id": None, "message_id": None, "tool_invoked": True, "actual_routing": "both"},
+            {"answer": "ok", "conversation_id": None, "message_id": None, "tool_invoked": True, "tool_name": "lookup_servant", "actual_routing": "both"},
             {"answer": "ok", "conversation_id": None, "message_id": None, "tool_invoked": False, "actual_routing": "none"},
             {"answer": "ok", "conversation_id": None, "message_id": None, "tool_invoked": False, "actual_routing": "none"},
-            {"answer": "ok", "conversation_id": None, "message_id": None, "tool_invoked": True, "actual_routing": "both"},
-            {"answer": "ok", "conversation_id": None, "message_id": None, "tool_invoked": True, "actual_routing": "both"},
+            {"answer": "ok", "conversation_id": None, "message_id": None, "tool_invoked": True, "tool_name": "tavily_search", "actual_routing": "both"},
+            {"answer": "ok", "conversation_id": None, "message_id": None, "tool_invoked": True, "tool_name": ["lookup_servant", "tavily_search"], "actual_routing": "both"},
         ]
         with TemporaryDirectory() as directory:
             case_path = self.write_cases(directory, cases=cases)
@@ -754,6 +763,119 @@ class AgentEvaluationCommandTests(TestCase):
         )
         self.assertEqual(results[0]["actual_routing"], "both")
         self.assertFalse(results[0]["routing_match"])
+
+    @override_settings(DIFY_API_BASE_URL="https://dify.example/v1", DIFY_API_KEY="dummy")
+    @patch("apps.agent.management.commands.evaluate_agent.stream_dify_chat")
+    def test_tool_selection_match_compares_expected_and_actual_tool_sets(self, chat):
+        expected_tools = [
+            ["tavily_search"],
+            ["tavily_search"],
+            ["lookup_servant"],
+            [],
+            [],
+            ["lookup_servant", "tavily_search"],
+            ["lookup_servant", "tavily_search"],
+        ]
+        actual_tools = [
+            ["tavily_search"],
+            [],
+            ["lookup_servant"],
+            [],
+            ["tavily_search"],
+            ["lookup_servant", "tavily_search"],
+            ["lookup_servant"],
+        ]
+        cases = []
+        for index, expected in enumerate(expected_tools, start=1):
+            cases.append(
+                {
+                    "id": f"selection-{index}",
+                    "category": "knowledge_hit",
+                    "question": f"selection question {index}",
+                    "source": "routing",
+                    "expected_facts": [],
+                    "forbidden_claims": [],
+                    "expected_tools": expected,
+                }
+            )
+        chat.side_effect = [
+            {
+                "answer": "ok",
+                "conversation_id": None,
+                "message_id": None,
+                "tool_invoked": bool(tools),
+                "actual_tools": tools,
+            }
+            for tools in actual_tools
+        ]
+
+        with TemporaryDirectory() as directory:
+            case_path = self.write_cases(directory, cases=cases)
+            output = Path(directory) / "selection.json"
+            call_command("evaluate_agent", cases=str(case_path), output=str(output))
+            results = json.loads(output.read_text(encoding="utf-8"))["results"]
+
+        self.assertEqual(
+            [result["tool_selection_match"] for result in results],
+            [True, False, True, True, False, True, False],
+        )
+
+    def test_stream_deduplicates_tool_names_and_keeps_compact_tavily_metadata(self):
+        node = {
+            "id": "node-tools",
+            "node_type": "agent",
+            "title": "Tool Agent",
+            "status": "succeeded",
+            "process_data": {
+                "tool_calls": [
+                    {
+                        "tool_name": "tavily_search",
+                        "tool_call_id": "tavily-1",
+                        "input": '{"query":"latest FGO JP event"}',
+                        "output": {
+                            "results": [
+                                {"url": "https://example.test/event", "content": "full page body"}
+                            ],
+                            "status": 200,
+                        },
+                    },
+                    {
+                        "tool_name": "tavily_search",
+                        "tool_call_id": "tavily-2",
+                        "input": '{"query":"latest FGO JP event official"}',
+                        "output": {"results": [{"url": "https://example.test/official"}], "status": 200},
+                    },
+                    {
+                        "tool_name": "lookup_servant",
+                        "tool_call_id": "lookup-1",
+                        "input": '{"name":"Oberon"}',
+                        "output": {"status": 200},
+                    },
+                ]
+            },
+            "outputs": {
+                "tool_calls": [
+                    {
+                        "tool_name": "lookup_servant",
+                        "tool_call_id": "lookup-1",
+                        "input": '{"name":"Oberon"}',
+                        "output": {"status": 200},
+                    }
+                ]
+            },
+        }
+
+        trace = evaluate_agent._stream_routing_metadata([node], {})
+
+        self.assertEqual(trace["actual_tools"], ["tavily_search", "lookup_servant"])
+        self.assertEqual(len(trace["tool_name"]), 3)
+        self.assertEqual(len(trace["tool_input"]), 3)
+        self.assertEqual(trace["tool_response_metadata"][0]["tool_call_id"], "tavily-1")
+        self.assertEqual(trace["tool_response_metadata"][0]["result_count"], 1)
+        self.assertEqual(trace["tool_response_metadata"][1]["tool_call_id"], "tavily-2")
+        self.assertEqual(trace["tool_response_metadata"][1]["result_count"], 1)
+        trace_text = json.dumps(trace, ensure_ascii=False)
+        self.assertNotIn("full page body", trace_text)
 
     @override_settings(DIFY_API_BASE_URL="https://dify.example/v1", DIFY_API_KEY="dummy")
     @patch("apps.agent.management.commands.evaluate_agent.requests.post")

@@ -67,6 +67,15 @@ Example curated POST-RAG run with explicit pacing:
 
 ## Tool-routing evaluation
 
+The Agent has three information paths:
+
+- Knowledge Retrieval for archive, mechanics, strategy, and world-setting explanations;
+- `lookup_servant` for exact structured Servant facts;
+- `tavily_search` for current, recent, or time-sensitive web information.
+
+Knowledge Retrieval remains always-on before the Agent. Tool-routing evaluations
+therefore measure Tool selection, not exclusive branching between RAG and Tools.
+
 `tool_routing_cases_v1.json` is a small curated set for checking whether the
 Agent routes structured Servant facts to `lookup_servant`, general FGO
 knowledge to RAG, and boundary questions to the appropriate combination or
@@ -97,3 +106,23 @@ or by deterministic tool name/input identity, and reasoning or full execution
 payloads are not persisted. It does not judge factual answer quality or infer
 routing from answer text. If the provider supplies no routing metadata,
 `actual_routing` is `unknown` and both routing checks are `false`.
+
+## Web Search routing evaluation
+
+`web_search_routing_cases_v1.json` contains current-information, structured
+Servant, stable archive, and mixed-source cases. Cases declare
+`expected_tools` as a list (possibly empty). The evaluator records a
+deduplicated `actual_tools` list from the structured SSE trace and sets
+`tool_selection_match` when the two sets are equal. Repeated calls to one Tool,
+such as Tavily query reformulation, remain visible in the compact per-call
+inputs and response metadata while counting once in `actual_tools`.
+
+Run it with an output path outside Git:
+
+```text
+..\.venv\Scripts\python.exe manage.py evaluate_agent \
+  --cases evals/web_search_routing_cases_v1.json \
+  --output D:\pyweb\chaldea-reports/web-search-routing-v1.json \
+  --retrieval-used \
+  --experiment-label web-search-routing-v1
+```

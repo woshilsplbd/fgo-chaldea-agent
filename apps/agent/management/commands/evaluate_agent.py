@@ -44,6 +44,18 @@ def _expected_tool_invoked(expected_routing):
     return None
 
 
+def _normalize_tool_names(value):
+    if isinstance(value, str) and value.strip():
+        return [value.strip()]
+    if isinstance(value, list):
+        names = []
+        for item in value:
+            if isinstance(item, str) and item.strip() and item.strip() not in names:
+                names.append(item.strip())
+        return names
+    return []
+
+
 def load_cases(path):
     try:
         payload = json.loads(path.read_text(encoding="utf-8"))
@@ -111,6 +123,14 @@ def load_cases(path):
         if expected_routing is not None and expected_routing not in SUPPORTED_ROUTINGS:
             raise CommandError(
                 f"case {case_id} has unsupported expected_routing: {expected_routing}"
+            )
+        expected_tools = case.get("expected_tools")
+        if expected_tools is not None and (
+            not isinstance(expected_tools, list)
+            or not all(isinstance(tool, str) and tool.strip() for tool in expected_tools)
+        ):
+            raise CommandError(
+                f"case {case_id} expected_tools must be a JSON list of non-empty strings"
             )
 
         group = case.get("conversation_group")
@@ -325,6 +345,7 @@ def _parse_trace_message(message):
     return {
         "trace_status": "ok",
         "tool_invoked": tool_invoked,
+        "actual_tools": _normalize_tool_names(tool_names),
         "tool_name": tool_names[0] if len(tool_names) == 1 else tool_names,
         "tool_input": tool_inputs[0] if len(tool_inputs) == 1 else tool_inputs,
         "tool_response_metadata": observations[0] if len(observations) == 1 else observations,
@@ -337,6 +358,7 @@ def fetch_dify_message_trace(conversation_id, message_id):
     unavailable = {
         "trace_status": "unavailable",
         "tool_invoked": None,
+        "actual_tools": [],
         "tool_name": None,
         "tool_input": None,
         "tool_response_metadata": None,
@@ -430,8 +452,21 @@ def _compact_tool_observation(value):
         for key in ("ok", "status", "status_code", "code", "message", "error"):
             if key in value:
                 selected[key] = _compact_trace_value(value[key])
+        result_count = _result_count(value)
+        if result_count is not None:
+            selected["result_count"] = result_count
         return selected or {"keys": sorted(str(key) for key in value)[:20]}
     return _compact_trace_value(value, limit=500)
+
+
+def _compact_tool_record_observation(record):
+    metadata = _compact_tool_observation(record.get("observation"))
+    tool_call_id = record.get("tool_call_id")
+    if tool_call_id is None:
+        return metadata
+    if isinstance(metadata, dict):
+        return {"tool_call_id": tool_call_id, **metadata}
+    return {"tool_call_id": tool_call_id, "result": metadata}
 
 
 def _compact_node_trace(node, tool_call_count=0, retrieval_result_count=None):
@@ -524,15 +559,17 @@ def _stream_routing_metadata(node_events, message_end_metadata):
     names = [item["tool_name"] for item in tool_records]
     inputs = [_compact_trace_value(item["tool_input"]) for item in tool_records]
     observations = [
-        _compact_tool_observation(item["observation"])
+        _compact_tool_record_observation(item)
         for item in tool_records
         if item.get("observation") is not None
     ]
+    actual_tools = _normalize_tool_names(names)
     return {
         "trace_status": "ok",
         "trace_source": "stream",
         "executed_nodes": executed_nodes,
         "tool_invoked": tool_invoked,
+        "actual_tools": actual_tools,
         "tool_name": names[0] if len(names) == 1 else names,
         "tool_input": inputs[0] if len(inputs) == 1 else inputs,
         "tool_response_metadata": observations[0]
@@ -712,6 +749,9 @@ class Command(BaseCommand):
                 "tool_name": None,
                 "tool_input": None,
                 "tool_response_metadata": None,
+                "expected_tools": case.get("expected_tools"),
+                "actual_tools": [],
+                "tool_selection_match": None,
                 "expected_routing": case.get("expected_routing"),
                 "expected_tool_invoked": _expected_tool_invoked(
                     case.get("expected_routing")
@@ -759,12 +799,19 @@ class Command(BaseCommand):
                             "tool_name",
                             "tool_input",
                             "tool_response_metadata",
+                            "actual_tools",
                             "retrieval_used",
                             "actual_routing",
                         )
                         if key in provider_result
                     }
                 )
+                if "actual_tools" in provider_result:
+                    record["actual_tools"] = _normalize_tool_names(
+                        provider_result["actual_tools"]
+                    )
+                else:
+                    record["actual_tools"] = _normalize_tool_names(record["tool_name"])
                 expected_routing = record["expected_routing"]
                 record["routing_match"] = (
                     expected_routing is not None
@@ -776,6 +823,10 @@ class Command(BaseCommand):
                     and record["tool_invoked"] is not None
                     and record["tool_invoked"] == expected_tool_invoked
                 )
+                if "expected_tools" in case:
+                    record["tool_selection_match"] = set(record["actual_tools"]) == set(
+                        case["expected_tools"]
+                    )
                 if group and returned_conversation_id:
                     group_conversations[group] = returned_conversation_id
             except services.AgentNotConfiguredError as exc:

@@ -1,0 +1,74 @@
+[
+  {
+    "id": "web-current-event",
+    "category": "knowledge_hit",
+    "question": "What event is currently running in FGO JP?",
+    "source": "Current FGO JP web information",
+    "expected_facts": [],
+    "forbidden_claims": [],
+    "expected_tools": ["tavily_search"]
+  },
+  {
+    "id": "web-maintenance",
+    "category": "knowledge_hit",
+    "question": "What is the latest maintenance announcement for FGO JP?",
+    "source": "Current FGO JP web information",
+    "expected_facts": [],
+    "forbidden_claims": [],
+    "expected_tools": ["tavily_search"]
+  },
+  {
+    "id": "web-summon-campaign",
+    "category": "knowledge_hit",
+    "question": "What summon campaign or banner is currently available in FGO JP?",
+    "source": "Current FGO JP web information",
+    "expected_facts": [],
+    "forbidden_claims": [],
+    "expected_tools": ["tavily_search"]
+  },
+  {
+    "id": "servant-oberon-rarity",
+    "category": "out_of_scope_structured_fact",
+    "question": "What rarity is Oberon?",
+    "source": "Structured Servant Tool: lookup_servant",
+    "expected_facts": [],
+    "forbidden_claims": [],
+    "expected_tools": ["lookup_servant"]
+  },
+  {
+    "id": "rag-mighty-chain",
+    "category": "knowledge_hit",
+    "question": "What cards make a Mighty Chain?",
+    "source": "combat_mechanics.md — Mighty Chain",
+    "expected_facts": [],
+    "forbidden_claims": [],
+    "expected_tools": []
+  },
+  {
+    "id": "rag-chaldea-mission",
+    "category": "knowledge_hit",
+    "question": "How does the archive describe Chaldea's mission?",
+    "source": "world_setting.md — Chaldea mission",
+    "expected_facts": [],
+    "forbidden_claims": [],
+    "expected_tools": []
+  },
+  {
+    "id": "mixed-oberon-current-banner",
+    "category": "retrieval_discrimination",
+    "question": "What is Oberon's class, and is he featured in any currently running FGO JP summon?",
+    "source": "Structured Servant Tool plus current FGO JP web information",
+    "expected_facts": [],
+    "forbidden_claims": [],
+    "expected_tools": ["lookup_servant", "tavily_search"]
+  },
+  {
+    "id": "web-current-version",
+    "category": "knowledge_hit",
+    "question": "What is the current FGO JP game version or latest version update?",
+    "source": "Current FGO JP web information",
+    "expected_facts": [],
+    "forbidden_claims": [],
+    "expected_tools": ["tavily_search"]
+  }
+]
