@@ -1,7 +1,9 @@
 import json
+import re
 import time
 from pathlib import Path
 
+import requests
 from django.conf import settings
 from django.core.management.base import BaseCommand, CommandError
 
@@ -22,6 +24,8 @@ SUPPORTED_AUTHORITY_SCOPES = {
     "STRUCTURED_TOOL_BOUNDARY",
 }
 SUPPORTED_ROUTINGS = {"servant_tool", "rag", "both"}
+DIFY_USER = "chaldea-agent-dev"
+TRACE_LIMIT = 20
 REQUIRED_CASE_FIELDS = {
     "id",
     "category",
@@ -243,6 +247,127 @@ def routing_metadata(result):
     }
 
 
+def _sanitize_trace_text(value, limit=2000):
+    text = str(value)
+    text = re.sub(
+        r"(?i)(authorization|api[_-]?key|token|secret)\s*[:=]\s*[^,\s]+",
+        r"\1=[redacted]",
+        text,
+    )
+    return text[:limit]
+
+
+def _compact_trace_value(value):
+    if isinstance(value, dict):
+        return _redact_sensitive(value)
+    if isinstance(value, list):
+        return [_compact_trace_value(item) for item in value]
+    if isinstance(value, str):
+        return _sanitize_trace_text(value)
+    return value
+
+
+def _parse_trace_message(message):
+    if not isinstance(message, dict):
+        return None
+
+    thoughts = message.get("agent_thoughts")
+    resources_present = "retriever_resources" in message
+    resources = message.get("retriever_resources")
+    if not isinstance(thoughts, list) or (
+        not resources_present and "agent_thoughts" not in message
+    ):
+        return None
+
+    tool_names = []
+    tool_inputs = []
+    observations = []
+    for thought in thoughts:
+        if not isinstance(thought, dict):
+            continue
+        tool = thought.get("tool")
+        if not isinstance(tool, str) or not tool.strip():
+            continue
+        tool_names.append(tool.strip())
+        raw_input = thought.get("tool_input")
+        if isinstance(raw_input, str):
+            try:
+                raw_input = json.loads(raw_input)
+            except (TypeError, ValueError):
+                raw_input = _sanitize_trace_text(raw_input)
+        tool_inputs.append(_compact_trace_value(raw_input))
+        if "observation" in thought:
+            observations.append(_compact_trace_value(thought["observation"]))
+
+    if isinstance(resources, list):
+        retrieval_used = bool(resources)
+    else:
+        retrieval_used = None
+
+    tool_invoked = bool(tool_names)
+    if tool_invoked and retrieval_used is True:
+        actual_routing = "both"
+    elif tool_invoked:
+        actual_routing = "servant_tool"
+    elif retrieval_used is True:
+        actual_routing = "rag"
+    else:
+        actual_routing = "none" if retrieval_used is False else "unknown"
+
+    return {
+        "trace_status": "ok",
+        "tool_invoked": tool_invoked,
+        "tool_name": tool_names[0] if len(tool_names) == 1 else tool_names,
+        "tool_input": tool_inputs[0] if len(tool_inputs) == 1 else tool_inputs,
+        "tool_response_metadata": observations[0] if len(observations) == 1 else observations,
+        "retrieval_used": retrieval_used,
+        "actual_routing": actual_routing,
+    }
+
+
+def fetch_dify_message_trace(conversation_id, message_id):
+    unavailable = {
+        "trace_status": "unavailable",
+        "tool_invoked": None,
+        "tool_name": None,
+        "tool_input": None,
+        "tool_response_metadata": None,
+        "retrieval_used": None,
+        "actual_routing": "unknown",
+    }
+    if not conversation_id or not message_id:
+        return unavailable
+
+    base_url = (getattr(settings, "DIFY_API_BASE_URL", "") or "").strip().rstrip("/")
+    api_key = (getattr(settings, "DIFY_API_KEY", "") or "").strip()
+    if not base_url or not api_key:
+        return unavailable
+
+    try:
+        response = requests.get(
+            f"{base_url}/messages",
+            headers={"Authorization": f"Bearer {api_key}"},
+            params={
+                "conversation_id": conversation_id,
+                "user": DIFY_USER,
+                "limit": TRACE_LIMIT,
+            },
+            timeout=getattr(settings, "DIFY_TIMEOUT_SECONDS", 30.0),
+        )
+        response.raise_for_status()
+        payload = response.json()
+    except (requests.RequestException, TypeError, ValueError):
+        return unavailable
+
+    messages = payload.get("data") if isinstance(payload, dict) else None
+    if not isinstance(messages, list):
+        return unavailable
+    for message in messages:
+        if isinstance(message, dict) and message.get("id") == message_id:
+            return _parse_trace_message(message) or unavailable
+    return unavailable
+
+
 class Command(BaseCommand):
     help = "Record raw Agent answers for the version-controlled evaluation cases."
 
@@ -323,6 +448,7 @@ class Command(BaseCommand):
                 "actual_routing": "unknown",
                 "routing_match": False,
                 "retrieval_used": None,
+                "trace_status": "unavailable",
             }
             if "authority_scope" in case:
                 record["authority_scope"] = case["authority_scope"]
@@ -346,12 +472,15 @@ class Command(BaseCommand):
                         "message_id": message_id,
                     }
                 )
-                routing = routing_metadata(provider_result)
-                record.update(routing)
+                trace = fetch_dify_message_trace(
+                    returned_conversation_id,
+                    message_id,
+                )
+                record.update(trace)
                 expected_routing = record["expected_routing"]
                 record["routing_match"] = (
                     expected_routing is not None
-                    and routing["actual_routing"] == expected_routing
+                    and trace["actual_routing"] == expected_routing
                 )
                 if group and returned_conversation_id:
                     group_conversations[group] = returned_conversation_id

@@ -11,6 +11,7 @@ from django.test import Client, TestCase
 from django.urls import reverse
 
 from . import services
+from .management.commands import evaluate_agent
 
 
 class AgentChatPageTests(TestCase):
@@ -385,19 +386,33 @@ class AgentEvaluationCommandTests(TestCase):
         self.assertNotIn("dummy", output_text)
 
     @override_settings(DIFY_API_BASE_URL="https://dify.example/v1", DIFY_API_KEY="dummy")
+    @patch("apps.agent.management.commands.evaluate_agent.requests.get")
     @patch("apps.agent.management.commands.evaluate_agent.services.chat")
-    def test_runner_records_routing_metadata_and_redacts_secrets(self, chat):
+    def test_runner_records_routing_metadata_and_redacts_secrets(self, chat, history_get):
         chat.return_value = {
             "answer": "Oberon is a Pretender.",
-            "conversation_id": None,
+            "conversation_id": "conversation-1",
             "message_id": "message-1",
-            "routing": {
-                "tool_invoked": True,
-                "tool_name": "lookup_servant",
-                "tool_input": {"servant_id": 42, "api_key": "private-key"},
-                "tool_response_metadata": {"status": 200},
-                "retrieval_used": False,
-            },
+        }
+        history_get.return_value.raise_for_status.return_value = None
+        history_get.return_value.json.return_value = {
+            "data": [
+                {"id": "unrelated", "agent_thoughts": [], "retriever_resources": []},
+                {
+                    "id": "message-1",
+                    "agent_thoughts": [
+                        {"tool": "", "tool_input": "", "observation": "ignored"},
+                        {
+                            "tool": "lookup_servant",
+                            "tool_input": json.dumps(
+                                {"servant_id": 42, "api_key": "private-key"}
+                            ),
+                            "observation": {"status": 200},
+                        },
+                    ],
+                    "retriever_resources": [],
+                },
+            ]
         }
         with TemporaryDirectory() as directory:
             cases = self.write_cases(directory, cases=[
@@ -426,6 +441,135 @@ class AgentEvaluationCommandTests(TestCase):
         self.assertEqual(result["actual_routing"], "servant_tool")
         self.assertTrue(result["routing_match"])
         self.assertNotIn("private-key", output_text)
+        history_get.assert_called_once_with(
+            "https://dify.example/v1/messages",
+            headers={"Authorization": "Bearer dummy"},
+            params={
+                "conversation_id": "conversation-1",
+                "user": "chaldea-agent-dev",
+                "limit": 20,
+            },
+            timeout=30.0,
+        )
+
+    @override_settings(DIFY_API_BASE_URL="https://dify.example/v1", DIFY_API_KEY="dummy")
+    def trace_from_message(self, message):
+        with patch("apps.agent.management.commands.evaluate_agent.requests.get") as history_get:
+            history_get.return_value.raise_for_status.return_value = None
+            history_get.return_value.json.return_value = {"data": [message]}
+            return evaluate_agent.fetch_dify_message_trace("conversation-1", "message-1")
+
+    @override_settings(DIFY_API_BASE_URL="https://dify.example/v1", DIFY_API_KEY="dummy")
+    def test_trace_classifies_tool_only_retrieval_only_both_and_neither(self):
+        cases = [
+            (
+                {"agent_thoughts": [{"tool": "lookup_servant", "tool_input": "{}"}], "retriever_resources": []},
+                "servant_tool",
+            ),
+            (
+                {"agent_thoughts": [], "retriever_resources": [{"document_name": "combat"}]},
+                "rag",
+            ),
+            (
+                {"agent_thoughts": [{"tool": "lookup_servant", "tool_input": "{}"}], "retriever_resources": [{"document_name": "combat"}]},
+                "both",
+            ),
+            (
+                {"agent_thoughts": [], "retriever_resources": []},
+                "none",
+            ),
+        ]
+
+        for message, expected_routing in cases:
+            with self.subTest(expected_routing=expected_routing):
+                message["id"] = "message-1"
+                trace = self.trace_from_message(message)
+                self.assertEqual(trace["actual_routing"], expected_routing)
+                self.assertEqual(trace["retrieval_used"], expected_routing in ("rag", "both"))
+
+    @override_settings(DIFY_API_BASE_URL="https://dify.example/v1", DIFY_API_KEY="dummy")
+    def test_trace_ignores_empty_tools_and_parses_multiple_thoughts(self):
+        trace = self.trace_from_message(
+            {
+                "id": "message-1",
+                "agent_thoughts": [
+                    {"tool": "", "tool_input": "ignored"},
+                    {"tool": "lookup_servant", "tool_input": '{"servant_id": 42}', "observation": {"status": 200}},
+                    {"tool": "lookup_servant", "tool_input": "not-json", "observation": "safe observation"},
+                ],
+                "retriever_resources": [],
+            }
+        )
+
+        self.assertTrue(trace["tool_invoked"])
+        self.assertEqual(trace["tool_name"], ["lookup_servant", "lookup_servant"])
+        self.assertEqual(trace["tool_input"][0], {"servant_id": 42})
+        self.assertEqual(trace["tool_input"][1], "not-json")
+        self.assertEqual(trace["tool_response_metadata"], [{"status": 200}, "safe observation"])
+
+    @override_settings(DIFY_API_BASE_URL="https://dify.example/v1", DIFY_API_KEY="dummy")
+    def test_trace_matches_exact_message_id_and_ignores_unrelated_history(self):
+        with patch("apps.agent.management.commands.evaluate_agent.requests.get") as history_get:
+            history_get.return_value.raise_for_status.return_value = None
+            history_get.return_value.json.return_value = {
+                "data": [
+                    {"id": "other", "agent_thoughts": [{"tool": "wrong"}], "retriever_resources": [{"x": 1}]},
+                    {"id": "message-1", "agent_thoughts": [], "retriever_resources": []},
+                ]
+            }
+            trace = evaluate_agent.fetch_dify_message_trace("conversation-1", "message-1")
+
+        self.assertEqual(trace["trace_status"], "ok")
+        self.assertFalse(trace["tool_invoked"])
+        self.assertEqual(trace["actual_routing"], "none")
+
+    @override_settings(DIFY_API_BASE_URL="https://dify.example/v1", DIFY_API_KEY="dummy")
+    def test_trace_unavailable_is_non_fatal_and_classifies_unknown(self):
+        with patch(
+            "apps.agent.management.commands.evaluate_agent.requests.get",
+            side_effect=requests.RequestException("private history failure"),
+        ):
+            trace = evaluate_agent.fetch_dify_message_trace("conversation-1", "message-1")
+
+        self.assertEqual(trace["trace_status"], "unavailable")
+        self.assertEqual(trace["actual_routing"], "unknown")
+        self.assertIsNone(trace["retrieval_used"])
+
+    @override_settings(DIFY_API_BASE_URL="https://dify.example/v1", DIFY_API_KEY="dummy")
+    @patch(
+        "apps.agent.management.commands.evaluate_agent.requests.get",
+        side_effect=requests.RequestException("private history failure"),
+    )
+    @patch("apps.agent.management.commands.evaluate_agent.services.chat")
+    def test_trace_failure_preserves_successful_answer(self, chat, history_get):
+        chat.return_value = {
+            "answer": "safe answer",
+            "conversation_id": "conversation-1",
+            "message_id": "message-1",
+        }
+        with TemporaryDirectory() as directory:
+            cases = self.write_cases(directory, cases=[
+                {
+                    "id": "trace-failure",
+                    "category": "knowledge_hit",
+                    "question": "question",
+                    "source": "source",
+                    "expected_facts": [],
+                    "forbidden_claims": [],
+                    "expected_routing": "rag",
+                }
+            ])
+            output = Path(directory) / "results.json"
+            call_command("evaluate_agent", cases=str(cases), output=str(output))
+            result = json.loads(output.read_text(encoding="utf-8"))["results"][0]
+
+        self.assertEqual(result["status"], "success")
+        self.assertTrue(result["success"])
+        self.assertEqual(result["answer"], "safe answer")
+        self.assertEqual(result["trace_status"], "unavailable")
+        self.assertEqual(result["actual_routing"], "unknown")
+        self.assertFalse(result["routing_match"])
+        history_get.assert_called_once()
 
     @override_settings(DIFY_API_BASE_URL="https://dify.example/v1", DIFY_API_KEY="dummy")
     @patch("apps.agent.management.commands.evaluate_agent.services.chat")
