@@ -27,6 +27,7 @@ class AgentChatPageTests(TestCase):
         self.assertContains(response, 'action="/api/agent/chat/stream/"')
         self.assertContains(response, 'id="agent-input"')
         self.assertContains(response, 'id="agent-send"')
+        self.assertContains(response, 'id="agent-new-chat"')
         self.assertContains(response, "Agent 服务状态：等待首次请求。")
         self.assertNotContains(response, "Agent 后端尚未连接。")
         self.assertContains(response, "function renderMarkdown")
@@ -46,6 +47,45 @@ class AgentChatPageTests(TestCase):
         self.assertNotContains(response, 'id="agent-send" disabled')
         self.assertNotContains(response, "dify")
         self.assertNotContains(response, "openai")
+
+    def test_local_persistence_contract_is_versioned_and_safe(self):
+        response = self.client.get(reverse("agent:chat"))
+        content = response.content.decode("utf-8")
+
+        self.assertContains(response, 'const localStorageKey = "chaldea_agent_chat_v1"')
+        self.assertContains(response, "const STORAGE_VERSION = 1")
+        self.assertContains(response, "const MAX_STORED_MESSAGES = 50")
+        self.assertContains(response, "const MAX_STORED_CONTENT_LENGTH = 8000")
+        self.assertContains(response, "const MAX_STORED_STATE_LENGTH = 100000")
+        self.assertContains(response, "function readLocalState()")
+        self.assertContains(response, "function restoreLocalState()")
+        self.assertContains(response, "function persistState()")
+        self.assertContains(response, "JSON.parse(raw)")
+        self.assertContains(response, "raw.length > MAX_STORED_STATE_LENGTH")
+        self.assertContains(response, "if (!storageAvailable()) return null")
+        self.assertContains(response, "message.role === \"user\" || message.role === \"assistant\"")
+        self.assertContains(response, "message.content.length <= MAX_STORED_CONTENT_LENGTH")
+        self.assertContains(response, "body.textContent = text")
+        self.assertContains(response, "message.role === \"assistant\"")
+        self.assertContains(response, "addMessage(")
+        self.assertContains(response, "window.localStorage.removeItem(localStorageKey)")
+        self.assertContains(response, "function resetLocalState()")
+        self.assertContains(response, "newChatButton.disabled = isBusy")
+        self.assertContains(response, "if (sendButton.disabled) return")
+
+        done_index = content.index('} else if (eventType === "done")')
+        assistant_persist_index = content.index(
+            'persistedMessages.push({ role: "assistant", content: assistantText })'
+        )
+        error_index = content.index('} else if (eventType === "error")')
+        self.assertGreater(assistant_persist_index, done_index)
+        self.assertGreater(error_index, assistant_persist_index)
+        self.assertEqual(content.count("conversationId = data.conversation_id || null"), 1)
+        self.assertNotIn(
+            'persistedMessages.push({ role: "assistant", content: assistantText })',
+            content[error_index:],
+        )
+        self.assertContains(response, "restoreLocalState();")
 
     def test_agent_navigation_points_to_agent_page(self):
         response = self.client.get(reverse("agent:chat"))

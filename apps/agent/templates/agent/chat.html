@@ -52,6 +52,18 @@
         background: rgba(30, 41, 59, .9);
     }
 
+    #agent-chat .agent-conversation-toolbar {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 12px;
+        margin-bottom: 12px;
+    }
+
+    #agent-chat .agent-conversation-toolbar h2 {
+        margin: 0;
+    }
+
     #agent-chat .agent-message-label {
         display: block;
         margin-bottom: 4px;
@@ -106,7 +118,10 @@
                 </header>
 
                 <section class="fgo-card" aria-labelledby="agent-conversation-title">
-                    <h2 id="agent-conversation-title">Chaldea Agent</h2>
+                    <div class="agent-conversation-toolbar">
+                        <h2 id="agent-conversation-title">Chaldea Agent</h2>
+                        <button id="agent-new-chat" class="btn btn-default btn-sm" type="button">新对话</button>
+                    </div>
                     <div id="agent-messages" class="agent-messages" aria-live="polite">
                         <p id="agent-status" class="agent-status" data-state="idle" role="status">Agent 服务状态：等待首次请求。</p>
                     </div>
@@ -131,11 +146,118 @@
         const composer = document.getElementById("agent-composer");
         const input = document.getElementById("agent-input");
         const sendButton = document.getElementById("agent-send");
+        const newChatButton = document.getElementById("agent-new-chat");
         const messages = document.getElementById("agent-messages");
         const status = document.getElementById("agent-status");
         const csrfToken = composer.querySelector("[name=csrfmiddlewaretoken]").value;
         const endpoint = composer.action;
+        // Browser-local MVP state only; this is not account-backed history.
+        const localStorageKey = "chaldea_agent_chat_v1";
+        const STORAGE_VERSION = 1;
+        const MAX_STORED_MESSAGES = 50;
+        const MAX_STORED_CONTENT_LENGTH = 8000;
+        const MAX_STORED_STATE_LENGTH = 100000;
         let conversationId = null;
+        let persistedMessages = [];
+
+        function storageAvailable() {
+            try {
+                const probeKey = localStorageKey + "_probe";
+                window.localStorage.setItem(probeKey, "1");
+                window.localStorage.removeItem(probeKey);
+                return true;
+            } catch (error) {
+                return false;
+            }
+        }
+
+        function trimStoredMessages(state) {
+            const messagesToKeep = Array.isArray(state.messages) ? state.messages : [];
+            const normalized = messagesToKeep.filter(function (message) {
+                return message &&
+                    (message.role === "user" || message.role === "assistant") &&
+                    typeof message.content === "string" &&
+                    message.content.length <= MAX_STORED_CONTENT_LENGTH;
+            }).slice(-MAX_STORED_MESSAGES);
+            const candidate = {
+                version: STORAGE_VERSION,
+                conversation_id: typeof state.conversation_id === "string" && state.conversation_id.length <= 256
+                    ? state.conversation_id
+                    : null,
+                messages: normalized,
+                updated_at: typeof state.updated_at === "string" ? state.updated_at : new Date().toISOString()
+            };
+            while (normalized.length && JSON.stringify(candidate).length > MAX_STORED_STATE_LENGTH) {
+                normalized.shift();
+            }
+            return candidate;
+        }
+
+        function readLocalState() {
+            if (!storageAvailable()) return null;
+            try {
+                const raw = window.localStorage.getItem(localStorageKey);
+                if (!raw || raw.length > MAX_STORED_STATE_LENGTH) return null;
+                const state = JSON.parse(raw);
+                if (!state || typeof state !== "object" || state.version !== STORAGE_VERSION ||
+                    !Array.isArray(state.messages) ||
+                    (state.conversation_id !== null && typeof state.conversation_id !== "string") ||
+                    (typeof state.conversation_id === "string" && state.conversation_id.length > 256)) {
+                    return null;
+                }
+                return trimStoredMessages(state);
+            } catch (error) {
+                return null;
+            }
+        }
+
+        function persistState() {
+            if (!storageAvailable()) return;
+            const state = trimStoredMessages({
+                version: STORAGE_VERSION,
+                conversation_id: conversationId,
+                messages: persistedMessages,
+                updated_at: new Date().toISOString()
+            });
+            try {
+                const serialized = JSON.stringify(state);
+                if (serialized.length <= MAX_STORED_STATE_LENGTH) {
+                    window.localStorage.setItem(localStorageKey, serialized);
+                }
+            } catch (error) {
+                // Browser storage is optional; continue with in-memory chat state.
+            }
+        }
+
+        function restoreLocalState() {
+            const state = readLocalState();
+            if (!state) return;
+            conversationId = state.conversation_id;
+            persistedMessages = state.messages;
+            persistedMessages.forEach(function (message) {
+                addMessage(
+                    message.role === "user" ? "你" : "Agent",
+                    message.content,
+                    message.role === "user" ? "agent-user-message" : "agent-assistant-message",
+                    message.role === "assistant"
+                );
+            });
+        }
+
+        function resetLocalState() {
+            conversationId = null;
+            persistedMessages = [];
+            try {
+                window.localStorage.removeItem(localStorageKey);
+            } catch (error) {
+                // Browser storage is optional; the reset still applies in memory.
+            }
+            messages.querySelectorAll(".agent-message").forEach(function (message) {
+                message.remove();
+            });
+            setStatus("Agent 服务状态：等待首次请求。", "idle");
+            input.focus();
+        }
 
         function renderMarkdown(text) {
             const escaped = String(text).replace(/[&<>"']/g, function (character) {
@@ -204,6 +326,7 @@
         function setBusy(isBusy) {
             input.disabled = isBusy;
             sendButton.disabled = isBusy;
+            newChatButton.disabled = isBusy;
         }
 
         function parseSseFrame(frame, dispatch) {
@@ -273,6 +396,8 @@
 
         async function submitMessage(message) {
             addMessage("你", message, "agent-user-message", false);
+            persistedMessages.push({ role: "user", content: message });
+            persistState();
             const assistant = addMessage("Agent", "", "agent-assistant-message", false);
             assistant.body.style.whiteSpace = "pre-wrap";
             input.value = "";
@@ -332,6 +457,8 @@
                             return;
                         }
                         conversationId = data.conversation_id || null;
+                        persistedMessages.push({ role: "assistant", content: assistantText });
+                        persistState();
                         assistant.body.className = "agent-markdown";
                         assistant.body.style.whiteSpace = "";
                         assistant.body.innerHTML = renderMarkdown(assistantText);
@@ -359,6 +486,13 @@
             if (!message || sendButton.disabled) return;
             submitMessage(message);
         });
+
+        newChatButton.addEventListener("click", function () {
+            if (sendButton.disabled) return;
+            resetLocalState();
+        });
+
+        restoreLocalState();
     }());
 </script>
 {% endblock %}
