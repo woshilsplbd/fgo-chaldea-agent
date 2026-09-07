@@ -777,7 +777,7 @@ class AgentEvaluationCommandTests(TestCase):
             ["lookup_servant", "tavily_search"],
         ]
         actual_tools = [
-            ["tavily_search"],
+            "tavily_search;tavily_search",
             [],
             ["lookup_servant"],
             [],
@@ -837,6 +837,7 @@ class AgentEvaluationCommandTests(TestCase):
                                 {"url": "https://example.test/event", "content": "full page body"}
                             ],
                             "status": 200,
+                            "message": "<think>private reasoning</think>ok",
                         },
                     },
                     {
@@ -876,6 +877,108 @@ class AgentEvaluationCommandTests(TestCase):
         self.assertEqual(trace["tool_response_metadata"][1]["result_count"], 1)
         trace_text = json.dumps(trace, ensure_ascii=False)
         self.assertNotIn("full page body", trace_text)
+        self.assertNotIn("private reasoning", trace_text)
+
+    def test_semicolon_tool_names_are_split_and_deduplicated(self):
+        self.assertEqual(
+            evaluate_agent._normalize_tool_names("tavily_search;tavily_search"),
+            ["tavily_search"],
+        )
+        self.assertEqual(
+            evaluate_agent._normalize_tool_names("lookup_servant;tavily_search"),
+            ["lookup_servant", "tavily_search"],
+        )
+        trace = evaluate_agent._stream_routing_metadata(
+            [
+                {
+                    "id": "node-tools",
+                    "node_type": "agent",
+                    "process_data": {
+                        "tool_name": "lookup_servant;tavily_search",
+                        "input": '{"query":"structured and current"}',
+                    },
+                }
+            ],
+            {},
+        )
+        self.assertEqual(trace["actual_tools"], ["lookup_servant", "tavily_search"])
+        self.assertEqual(trace["tool_name"], ["lookup_servant", "tavily_search"])
+        self.assertEqual(len(trace["tool_input"]), 2)
+
+    @override_settings(DIFY_API_BASE_URL="https://dify.example/v1", DIFY_API_KEY="dummy")
+    @patch("apps.agent.management.commands.evaluate_agent.requests.post")
+    def test_stream_uses_answer_node_fallback_without_message_chunks(self, post):
+        events = [
+            {
+                "event": "node_finished",
+                "data": {
+                    "node_type": "answer",
+                    "title": "Answer",
+                    "status": "succeeded",
+                    "outputs": {"answer": "structured final answer"},
+                },
+            },
+            {"event": "message_end", "data": {"id": "message-1", "conversation_id": "conversation-1"}},
+        ]
+        response = Mock()
+        response.iter_lines.return_value = [f"data: {json.dumps(event)}" for event in events]
+        post.return_value = response
+
+        result = evaluate_agent.stream_dify_chat("question")
+
+        self.assertEqual(result["answer"], "structured final answer")
+
+    @override_settings(DIFY_API_BASE_URL="https://dify.example/v1", DIFY_API_KEY="dummy")
+    @patch("apps.agent.management.commands.evaluate_agent.requests.post")
+    def test_stream_message_chunks_take_precedence_over_answer_node(self, post):
+        events = [
+            {
+                "event": "node_finished",
+                "data": {
+                    "node_type": "answer",
+                    "title": "Answer",
+                    "status": "succeeded",
+                    "outputs": {"answer": "structured fallback"},
+                },
+            },
+            {"event": "message", "data": {"answer": "streamed final"}},
+            {"event": "message_end", "data": {"id": "message-1", "conversation_id": "conversation-1"}},
+        ]
+        response = Mock()
+        response.iter_lines.return_value = [f"data: {json.dumps(event)}" for event in events]
+        post.return_value = response
+
+        result = evaluate_agent.stream_dify_chat("question")
+
+        self.assertEqual(result["answer"], "streamed final")
+
+    def test_retrieval_result_detection_is_structural(self):
+        populated = evaluate_agent._stream_routing_metadata(
+            [
+                {
+                    "id": "retrieval",
+                    "node_type": "knowledge-retrieval",
+                    "status": "succeeded",
+                    "outputs": {"documents": [{"id": 1}]},
+                }
+            ],
+            {"retriever_resources": []},
+        )
+        empty = evaluate_agent._stream_routing_metadata(
+            [
+                {
+                    "id": "retrieval",
+                    "node_type": "knowledge-retrieval",
+                    "status": "succeeded",
+                    "outputs": {"documents": []},
+                }
+            ],
+            {"retriever_resources": []},
+        )
+        self.assertTrue(populated["retrieval_used"])
+        self.assertEqual(populated["executed_nodes"][0]["retrieval_result_count"], 1)
+        self.assertFalse(empty["retrieval_used"])
+        self.assertEqual(empty["executed_nodes"][0]["retrieval_result_count"], 0)
 
     @override_settings(DIFY_API_BASE_URL="https://dify.example/v1", DIFY_API_KEY="dummy")
     @patch("apps.agent.management.commands.evaluate_agent.requests.post")

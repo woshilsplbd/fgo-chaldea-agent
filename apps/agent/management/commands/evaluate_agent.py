@@ -45,15 +45,18 @@ def _expected_tool_invoked(expected_routing):
 
 
 def _normalize_tool_names(value):
-    if isinstance(value, str) and value.strip():
-        return [value.strip()]
-    if isinstance(value, list):
-        names = []
-        for item in value:
-            if isinstance(item, str) and item.strip() and item.strip() not in names:
-                names.append(item.strip())
-        return names
-    return []
+    values = [value] if isinstance(value, str) else value
+    if not isinstance(values, list):
+        return []
+    names = []
+    for item in values:
+        if not isinstance(item, str):
+            continue
+        for name in item.split(";"):
+            name = name.strip()
+            if name and name not in names:
+                names.append(name)
+    return names
 
 
 def load_cases(path):
@@ -277,6 +280,7 @@ def routing_metadata(result):
 
 def _sanitize_trace_text(value, limit=2000):
     text = str(value)
+    text = re.sub(r"(?is)<think>.*?</think>", "", text)
     text = re.sub(
         r"(?i)(authorization|api[_-]?key|token|secret)\s*[:=]\s*[^,\s]+",
         r"\1=[redacted]",
@@ -287,7 +291,13 @@ def _sanitize_trace_text(value, limit=2000):
 
 def _compact_trace_value(value, limit=2000):
     if isinstance(value, dict):
-        return _redact_sensitive(value)
+        compact = {}
+        for key, item in value.items():
+            key_text = str(key).lower()
+            if any(marker in key_text for marker in ("reason", "thought", "llm_response")):
+                continue
+            compact[key] = _compact_trace_value(item, limit=limit)
+        return _redact_sensitive(compact)
     if isinstance(value, list):
         return [_compact_trace_value(item, limit=limit) for item in value]
     if isinstance(value, str):
@@ -416,18 +426,19 @@ def _collect_tool_records(value, records=None):
     if isinstance(value, dict):
         tool_name = value.get("tool_name") or value.get("tool")
         if isinstance(tool_name, str) and tool_name.strip():
-            records.append(
-                {
-                    "tool_name": tool_name.strip(),
-                    "tool_call_id": value.get("tool_call_id", value.get("id")),
-                    "tool_input": _parse_sse_tool_input(
-                        value.get("tool_input", value.get("input", value.get("arguments")))
-                    ),
-                    "observation": value.get(
-                        "observation", value.get("tool_output", value.get("output"))
-                    ),
-                }
-            )
+            for name in _normalize_tool_names(tool_name):
+                records.append(
+                    {
+                        "tool_name": name,
+                        "tool_call_id": value.get("tool_call_id", value.get("id")),
+                        "tool_input": _parse_sse_tool_input(
+                            value.get("tool_input", value.get("input", value.get("arguments")))
+                        ),
+                        "observation": value.get(
+                            "observation", value.get("tool_output", value.get("output"))
+                        ),
+                    }
+                )
         for item in value.values():
             _collect_tool_records(item, records)
     elif isinstance(value, list):
@@ -521,6 +532,8 @@ def _stream_routing_metadata(node_events, message_end_metadata):
             node_tools.extend(_collect_tool_records(node.get(field)))
         node_tools = _deduplicate_tool_records(node_tools)
         node_result_count = _result_count(node.get("outputs"))
+        if node_result_count is None and is_retrieval:
+            node_result_count = _result_count(node.get("process_data"))
         if is_retrieval and node_result_count:
             retrieval_node_with_results = True
         tool_records.extend(node_tools)
@@ -578,6 +591,47 @@ def _stream_routing_metadata(node_events, message_end_metadata):
         "retrieval_used": retrieval_used,
         "actual_routing": actual_routing,
     }
+
+
+def _visible_structured_answer(value):
+    if not isinstance(value, str):
+        return None
+    answer = _sanitize_trace_text(value, limit=10000).strip()
+    return answer or None
+
+
+def _structured_answer_from_nodes(node_events):
+    for node in reversed(node_events):
+        node_type = str(node.get("node_type") or "").lower()
+        title = str(node.get("title") or "").lower()
+        if "answer" not in node_type and "answer" not in title:
+            continue
+        outputs = node.get("outputs")
+        if isinstance(outputs, dict):
+            for key in ("answer", "text", "content"):
+                answer = _visible_structured_answer(outputs.get(key))
+                if answer:
+                    return answer
+        answer = _visible_structured_answer(outputs)
+        if answer:
+            return answer
+    return None
+
+
+def _structured_answer_from_payload(payload):
+    if not isinstance(payload, dict):
+        return None
+    for key in ("answer", "text", "content"):
+        answer = _visible_structured_answer(payload.get(key))
+        if answer:
+            return answer
+    outputs = payload.get("outputs")
+    if isinstance(outputs, dict):
+        for key in ("answer", "text", "content"):
+            answer = _visible_structured_answer(outputs.get(key))
+            if answer:
+                return answer
+    return None
 
 
 def stream_dify_chat(message, conversation_id=None):
@@ -662,9 +716,14 @@ def stream_dify_chat(message, conversation_id=None):
     if not isinstance(metadata, dict):
         metadata = message_end
     trace = _stream_routing_metadata(node_events, metadata)
+    answer = "".join(answer_parts).strip()
+    if not answer:
+        answer = _structured_answer_from_nodes(node_events)
+    if not answer:
+        answer = _structured_answer_from_payload(message_end)
     trace.update(
         {
-            "answer": "".join(answer_parts),
+            "answer": answer,
             "conversation_id": message_end.get("conversation_id"),
             "message_id": message_end.get("id", message_end.get("message_id")),
             "workflow_run_id": workflow_run_id,
