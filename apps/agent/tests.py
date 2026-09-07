@@ -684,6 +684,240 @@ class AgentStreamingServiceTests(TestCase):
         with self.assertRaisesRegex(services.AgentServiceError, "empty chat response"):
             list(streaming.stream_chat("question"))
 
+    @override_settings(DIFY_API_BASE_URL=base_url, DIFY_API_KEY=api_key)
+    @patch("apps.agent.streaming.requests.post")
+    def test_answer_node_before_message_end_is_streaming_fallback(self, post):
+        post.return_value = self.make_response(
+            self.sse_lines(
+                [
+                    json.dumps(
+                        {
+                            "event": "node_finished",
+                            "data": {
+                                "node_type": "answer",
+                                "title": "Answer",
+                                "outputs": {"answer": "structured final answer"},
+                            },
+                        }
+                    ),
+                    json.dumps(
+                        {
+                            "event": "message_end",
+                            "data": {
+                                "conversation_id": "conversation-1",
+                                "message_id": "message-1",
+                            },
+                        }
+                    ),
+                ]
+            )
+        )
+
+        self.assertEqual(
+            list(streaming.stream_chat("question")),
+            [
+                {"type": "delta", "text": "structured final answer"},
+                {
+                    "type": "done",
+                    "conversation_id": "conversation-1",
+                    "message_id": "message-1",
+                },
+            ],
+        )
+
+    @override_settings(DIFY_API_BASE_URL=base_url, DIFY_API_KEY=api_key)
+    @patch("apps.agent.streaming.requests.post")
+    def test_message_end_before_answer_node_uses_fallback(self, post):
+        post.return_value = self.make_response(
+            self.sse_lines(
+                [
+                    json.dumps(
+                        {
+                            "event": "message_end",
+                            "data": {
+                                "conversation_id": "conversation-2",
+                                "message_id": "message-2",
+                            },
+                        }
+                    ),
+                    json.dumps(
+                        {
+                            "event": "node_finished",
+                            "data": {
+                                "node_type": "answer",
+                                "outputs": {"text": "answer after end"},
+                            },
+                        }
+                    ),
+                ]
+            )
+        )
+
+        result = list(streaming.stream_chat("question"))
+
+        self.assertEqual(result[0], {"type": "delta", "text": "answer after end"})
+        self.assertEqual(result[-1]["conversation_id"], "conversation-2")
+        self.assertEqual(result[-1]["message_id"], "message-2")
+
+    @override_settings(DIFY_API_BASE_URL=base_url, DIFY_API_KEY=api_key)
+    @patch("apps.agent.streaming.requests.post")
+    def test_answer_node_allowlists_content_fields(self, post):
+        for field in ("answer", "text", "content"):
+            with self.subTest(field=field):
+                post.return_value = self.make_response(
+                    self.sse_lines(
+                        [
+                            json.dumps(
+                                {
+                                    "event": "node_finished",
+                                    "data": {
+                                        "node_type": "answer",
+                                        "outputs": {field: f"from {field}"},
+                                    },
+                                }
+                            ),
+                            json.dumps(
+                                {
+                                    "event": "message_end",
+                                    "data": {"conversation_id": "c"},
+                                }
+                            ),
+                        ]
+                    )
+                )
+                result = list(streaming.stream_chat("question"))
+                self.assertEqual(result[0]["text"], f"from {field}")
+
+    @override_settings(DIFY_API_BASE_URL=base_url, DIFY_API_KEY=api_key)
+    @patch("apps.agent.streaming.requests.post")
+    def test_message_deltas_take_precedence_over_answer_node(self, post):
+        post.return_value = self.make_response(
+            self.sse_lines(
+                [
+                    json.dumps(
+                        {
+                            "event": "message",
+                            "data": {"answer": "streamed answer"},
+                        }
+                    ),
+                    json.dumps(
+                        {
+                            "event": "node_finished",
+                            "data": {
+                                "node_type": "answer",
+                                "outputs": {"answer": "duplicate fallback"},
+                            },
+                        }
+                    ),
+                    json.dumps(
+                        {
+                            "event": "message_end",
+                            "data": {"conversation_id": "c"},
+                        }
+                    ),
+                ]
+            )
+        )
+
+        result = list(streaming.stream_chat("question"))
+
+        self.assertEqual(result[0], {"type": "delta", "text": "streamed answer"})
+        self.assertNotIn("duplicate fallback", json.dumps(result))
+
+    @override_settings(DIFY_API_BASE_URL=base_url, DIFY_API_KEY=api_key)
+    @patch("apps.agent.streaming.requests.post")
+    def test_non_answer_nodes_are_not_passthrough_fallbacks(self, post):
+        post.return_value = self.make_response(
+            self.sse_lines(
+                [
+                    json.dumps(
+                        {
+                            "event": "node_finished",
+                            "data": {
+                                "node_type": "tool",
+                                "outputs": {"answer": "tool secret"},
+                            },
+                        }
+                    ),
+                    json.dumps(
+                        {
+                            "event": "message_end",
+                            "data": {"conversation_id": "c"},
+                        }
+                    ),
+                ]
+            )
+        )
+
+        with self.assertRaisesRegex(services.AgentServiceError, "empty chat response"):
+            list(streaming.stream_chat("question"))
+
+    @override_settings(DIFY_API_BASE_URL=base_url, DIFY_API_KEY=api_key)
+    @patch("apps.agent.streaming.requests.post")
+    def test_answer_node_fallback_is_sanitized(self, post):
+        post.return_value = self.make_response(
+            self.sse_lines(
+                [
+                    json.dumps(
+                        {
+                            "event": "node_finished",
+                            "data": {
+                                "node_type": "answer",
+                                "outputs": {
+                                    "content": "<think>private\nreasoning</think>公开 **答案** https://example.com"
+                                },
+                            },
+                        }
+                    ),
+                    json.dumps(
+                        {
+                            "event": "message_end",
+                            "data": {"conversation_id": "c"},
+                        }
+                    ),
+                ]
+            )
+        )
+
+        result = list(streaming.stream_chat("question"))
+
+        self.assertEqual(
+            result[0],
+            {
+                "type": "delta",
+                "text": "公开 **答案** https://example.com",
+            },
+        )
+        self.assertNotIn("private", json.dumps(result))
+
+    @override_settings(DIFY_API_BASE_URL=base_url, DIFY_API_KEY=api_key)
+    @patch("apps.agent.streaming.requests.post")
+    def test_reasoning_only_answer_node_does_not_complete(self, post):
+        post.return_value = self.make_response(
+            self.sse_lines(
+                [
+                    json.dumps(
+                        {
+                            "event": "node_finished",
+                            "data": {
+                                "node_type": "answer",
+                                "outputs": {"answer": "<think>private thoughts</think>"},
+                            },
+                        }
+                    ),
+                    json.dumps(
+                        {
+                            "event": "message_end",
+                            "data": {"conversation_id": "c"},
+                        }
+                    ),
+                ]
+            )
+        )
+
+        with self.assertRaisesRegex(services.AgentServiceError, "empty chat response"):
+            list(streaming.stream_chat("question"))
+
     def test_stateful_sanitizer_preserves_visible_text_and_split_controls(self):
         sanitizer = streaming.ReasoningSanitizer()
         output = "".join(

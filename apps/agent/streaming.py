@@ -117,6 +117,34 @@ class ReasoningSanitizer:
         return pending
 
 
+def _answer_node_text(data):
+    """Return an allowlisted Answer-node output, if one is present."""
+    if not isinstance(data, dict):
+        return None
+
+    node_type = str(data.get("node_type") or "").lower()
+    title = str(data.get("title") or "").lower()
+    if "answer" not in node_type and "answer" not in title:
+        return None
+
+    outputs = data.get("outputs")
+    if not isinstance(outputs, dict):
+        return None
+    for key in ("answer", "text", "content"):
+        value = outputs.get(key)
+        if isinstance(value, str) and value:
+            return value
+    return None
+
+
+def _sanitize_answer_node_text(value):
+    """Sanitize a complete Answer-node value using the production sanitizer."""
+    sanitizer = ReasoningSanitizer()
+    visible = sanitizer.feed(value) + sanitizer.finish()
+    visible = visible.strip()
+    return visible or None
+
+
 def _configured_provider():
     base_url = (getattr(settings, "DIFY_API_BASE_URL", "") or "").strip().rstrip("/")
     api_key = (getattr(settings, "DIFY_API_KEY", "") or "").strip()
@@ -164,6 +192,7 @@ def stream_chat(message, conversation_id=None):
         sanitizer = ReasoningSanitizer()
         message_end = None
         visible_answer = False
+        answer_node_candidates = []
         try:
             for raw_line in response.iter_lines(decode_unicode=True):
                 if not raw_line:
@@ -195,7 +224,15 @@ def stream_chat(message, conversation_id=None):
                         yield {"type": "delta", "text": safe_chunk}
                 elif event_name == "message_end":
                     message_end = data
-                    break
+                    # A valid Chatflow may emit its Answer node after
+                    # message_end.  Keep reading until EOF when no visible
+                    # message text has arrived so that fallback can run.
+                    if visible_answer:
+                        break
+                elif event_name == "node_finished":
+                    answer = _answer_node_text(data)
+                    if answer is not None:
+                        answer_node_candidates.append(answer)
                 elif event_name == "error":
                     raise AgentServiceError("Dify streaming response reported an error")
                 # workflow/node/tool events are intentionally ignored.
@@ -209,6 +246,13 @@ def stream_chat(message, conversation_id=None):
             if trailing:
                 visible_answer = True
                 yield {"type": "delta", "text": trailing}
+            if not visible_answer:
+                for candidate in reversed(answer_node_candidates):
+                    fallback = _sanitize_answer_node_text(candidate)
+                    if fallback:
+                        visible_answer = True
+                        yield {"type": "delta", "text": fallback}
+                        break
             if not visible_answer:
                 raise AgentServiceError("Dify returned an empty chat response")
 
