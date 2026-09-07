@@ -46,6 +46,7 @@ class AgentChatPageTests(TestCase):
 
 class AgentChatApiTests(TestCase):
     api_url = reverse("agent_api:chat")
+    stream_api_url = reverse("agent_api:chat_stream")
 
     def post_json(self, payload, **extra):
         return self.client.post(
@@ -166,6 +167,129 @@ class AgentChatApiTests(TestCase):
 
         response = csrf_client.post(
             self.api_url,
+            data=json.dumps({"message": "hello"}),
+            content_type="application/json",
+        )
+
+        self.assertEqual(response.status_code, 403)
+
+    def post_stream_json(self, payload, **extra):
+        return self.client.post(
+            self.stream_api_url,
+            data=json.dumps(payload),
+            content_type="application/json",
+            **extra,
+        )
+
+    def stream_body(self, response):
+        return b"".join(response.streaming_content).decode("utf-8")
+
+    @patch("apps.agent.views.services.stream_chat")
+    def test_stream_valid_request_emits_sse_contract(self, stream_chat):
+        stream_chat.return_value = iter(
+            [
+                {"type": "delta", "text": "你好\n世界"},
+                {
+                    "type": "done",
+                    "conversation_id": "conversation-2",
+                    "message_id": "message-9",
+                },
+            ]
+        )
+
+        response = self.post_stream_json(
+            {"message": "  hello FGO  ", "conversation_id": "conversation-1"}
+        )
+        body = self.stream_body(response)
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response["Content-Type"], "text/event-stream; charset=utf-8")
+        self.assertEqual(response["Cache-Control"], "no-cache")
+        self.assertEqual(response["X-Accel-Buffering"], "no")
+        self.assertTrue(body.startswith('event: start\ndata: {"ok":true}\n\n'))
+        self.assertIn('event: delta\ndata: {"text":"你好\\n世界"}\n\n', body)
+        self.assertIn(
+            'event: done\ndata: {"conversation_id":"conversation-2","message_id":"message-9"}\n\n',
+            body,
+        )
+        self.assertEqual(body.count("\n\n"), 3)
+        stream_chat.assert_called_once_with("hello FGO", conversation_id="conversation-1")
+
+    def test_stream_get_is_rejected_with_json_error(self):
+        response = self.client.get(self.stream_api_url)
+
+        self.assertEqual(response.status_code, 405)
+        self.assertEqual(response.json()["code"], "method_not_allowed")
+
+    def test_stream_validation_errors_are_json_before_streaming(self):
+        cases = [
+            ({"message": "hello"}, "GET"),
+            ({"message": "hello"}, "POST_FORM"),
+            ("{broken", "POST_BAD_JSON"),
+            (["not", "an", "object"], "POST_ARRAY"),
+            ({"message": ""}, "POST_JSON"),
+            ({}, "POST_JSON"),
+            ({"message": "x" * 2001}, "POST_JSON"),
+            ({"message": "hello", "conversation_id": 3}, "POST_JSON"),
+        ]
+
+        for payload, mode in cases:
+            with self.subTest(mode=mode, payload=payload):
+                if mode == "GET":
+                    response = self.client.get(self.stream_api_url)
+                elif mode == "POST_FORM":
+                    response = self.client.post(
+                        self.stream_api_url,
+                        data="message=hello",
+                        content_type="application/x-www-form-urlencoded",
+                    )
+                elif mode == "POST_BAD_JSON":
+                    response = self.client.post(
+                        self.stream_api_url,
+                        data=payload,
+                        content_type="application/json",
+                    )
+                else:
+                    response = self.post_stream_json(payload)
+                self.assertEqual(response.status_code, 400 if mode != "GET" else 405)
+                self.assertEqual(response["Content-Type"], "application/json")
+                self.assertEqual(response.json()["code"], "invalid_request" if mode != "GET" else "method_not_allowed")
+
+    @patch("apps.agent.views.services.stream_chat")
+    def test_stream_provider_error_emits_controlled_error_without_done(self, stream_chat):
+        stream_chat.side_effect = services.AgentServiceError("private provider body")
+
+        response = self.post_stream_json({"message": "hello"})
+        body = self.stream_body(response)
+
+        self.assertIn('event: start\ndata: {"ok":true}\n\n', body)
+        self.assertIn(
+            'event: error\ndata: {"code":"agent_stream_error","message":"Agent service is temporarily unavailable."}\n\n',
+            body,
+        )
+        self.assertNotIn("private provider body", body)
+        self.assertNotIn("done", body)
+
+    @patch("apps.agent.views.services.stream_chat")
+    def test_stream_ignores_unknown_internal_events(self, stream_chat):
+        stream_chat.return_value = iter(
+            [
+                {"type": "node", "workflow_id": "private-workflow"},
+                {"type": "delta", "text": "safe"},
+                {"type": "done", "conversation_id": None, "message_id": None},
+            ]
+        )
+
+        body = self.stream_body(self.post_stream_json({"message": "hello"}))
+
+        self.assertIn('event: delta\ndata: {"text":"safe"}\n\n', body)
+        self.assertNotIn("private-workflow", body)
+
+    def test_stream_csrf_protection_remains_enabled(self):
+        csrf_client = Client(enforce_csrf_checks=True)
+
+        response = csrf_client.post(
+            self.stream_api_url,
             data=json.dumps({"message": "hello"}),
             content_type="application/json",
         )
