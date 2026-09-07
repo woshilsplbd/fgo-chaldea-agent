@@ -441,6 +441,9 @@
                             conversationUnavailable = true;
                             streamError = true;
                             markConversationUnavailable();
+                            if (!assistantText.trim() && assistant.message.parentNode) {
+                                assistant.message.remove();
+                            }
                             return;
                         }
                         const knownCodes = ["agent_not_configured", "agent_stream_error", "invalid_request", "method_not_allowed"];
@@ -459,6 +462,22 @@
                 }
 
                 const result = await readStream(response, function (eventType, data) {
+                    if (typeof data === "string") {
+                        try {
+                            data = JSON.parse(data);
+                        } catch (error) {
+                            data = null;
+                        }
+                    }
+                    if (eventType === "error" && data && data.code === "conversation_unavailable") {
+                        conversationUnavailable = true;
+                        streamError = true;
+                        markConversationUnavailable();
+                        if (!assistantText.trim() && assistant.message.parentNode) {
+                            assistant.message.remove();
+                        }
+                        return;
+                    }
                     if (!data || typeof data !== "object") return;
                     if (eventType === "start") {
                         setStatus("Agent 正在思考……", "pending");
@@ -485,13 +504,7 @@
                         setStatus("Agent 服务已连接。", "connected");
                         scrollMessages();
                     } else if (eventType === "error") {
-                        if (data.code === "conversation_unavailable") {
-                            conversationUnavailable = true;
-                            streamError = true;
-                            markConversationUnavailable();
-                        } else {
-                            streamError = true;
-                        }
+                        streamError = true;
                     }
                 });
 
@@ -501,8 +514,14 @@
             } catch (error) {
                 setStatus("Agent 服务暂时不可用，请稍后重试。", "error");
             } finally {
-                setBusy(false);
-                input.focus();
+                if (conversationRecoveryRequired) {
+                    input.disabled = true;
+                    sendButton.disabled = true;
+                    newChatButton.disabled = false;
+                } else {
+                    setBusy(false);
+                    input.focus();
+                }
             }
         }
 

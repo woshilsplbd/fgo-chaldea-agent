@@ -82,8 +82,18 @@ class AgentChatPageTests(TestCase):
         self.assertContains(response, "当前会话已失效，请点击“新对话”重新开始。")
         self.assertContains(response, "conversationRecoveryRequired = false")
         self.assertContains(response, "if (newChatButton.disabled) return")
+        self.assertContains(response, 'eventType === "error" && data && data.code === "conversation_unavailable"')
+        self.assertContains(response, "assistant.message.remove()")
+        self.assertContains(response, "input.disabled = true")
+        self.assertContains(response, "sendButton.disabled = true")
+        self.assertContains(response, "newChatButton.disabled = false")
 
         done_index = content.index('} else if (eventType === "done")')
+        specific_error_index = content.index(
+            'eventType === "error" && data && data.code === "conversation_unavailable"'
+        )
+        generic_error_index = content.index('} else if (eventType === "error")')
+        self.assertLess(specific_error_index, generic_error_index)
         assistant_persist_index = content.index(
             'persistedMessages.push({ role: "assistant", content: assistantText })'
         )
