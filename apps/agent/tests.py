@@ -227,6 +227,81 @@ class DifyServiceTests(TestCase):
         self.assertEqual(kwargs["timeout"], 12.5)
 
     @override_settings(DIFY_API_KEY=api_key, DIFY_API_BASE_URL=base_url)
+    def test_sanitizes_multiline_reasoning_and_preserves_markdown_urls_and_unicode(self):
+        self.mock_response(
+            {
+                "answer": (
+                    "<think>\nprivate reasoning\n</think>\n\n"
+                    "## 迦勒底\n\n答案见 https://example.com/fgo。"
+                )
+            }
+        )
+
+        result = services.chat("hello")
+
+        self.assertEqual(
+            result["answer"],
+            "## 迦勒底\n\n答案见 https://example.com/fgo。",
+        )
+        self.assertNotIn("private reasoning", result["answer"])
+
+    @override_settings(DIFY_API_KEY=api_key, DIFY_API_BASE_URL=base_url)
+    def test_sanitizes_multiple_think_blocks_and_reasoning_marker(self):
+        self.mock_response(
+            {
+                "answer": (
+                    "Intro\n<think>first\nline</think>\n"
+                    "<!--dify-deepseek-reasoning-->\n"
+                    "Middle\n<think>second</think>\nFinal"
+                )
+            }
+        )
+
+        result = services.chat("hello")
+
+        self.assertEqual(result["answer"], "Intro\n\nMiddle\n\nFinal")
+        self.assertNotIn("<think>", result["answer"])
+        self.assertNotIn("dify-deepseek-reasoning", result["answer"])
+
+    @override_settings(DIFY_API_KEY=api_key, DIFY_API_BASE_URL=base_url)
+    def test_normal_answer_is_unchanged(self):
+        self.mock_response({"answer": "Normal **Markdown**\n\nhttps://example.com"})
+
+        result = services.chat("hello")
+
+        self.assertEqual(result["answer"], "Normal **Markdown**\n\nhttps://example.com")
+
+    @override_settings(DIFY_API_KEY=api_key, DIFY_API_BASE_URL=base_url)
+    def test_reasoning_only_answer_raises_without_leaking_reasoning(self):
+        self.mock_response(
+            {"answer": "<!--dify-deepseek-reasoning--><think>only private thoughts</think>"}
+        )
+
+        with self.assertRaises(services.AgentServiceError) as context:
+            services.chat("hello")
+
+        self.assertNotIn("only private thoughts", str(context.exception))
+
+    @override_settings(DIFY_API_KEY=api_key, DIFY_API_BASE_URL=base_url)
+    @patch("apps.agent.services.requests.post")
+    def test_public_api_returns_sanitized_answer(self, post):
+        post.return_value.raise_for_status.return_value = None
+        post.return_value.json.return_value = {
+            "answer": "<think>private</think>公开答案",
+            "conversation_id": "conversation-1",
+        }
+
+        response = self.client.post(
+            reverse("agent_api:chat"),
+            data=json.dumps({"message": "hello"}),
+            content_type="application/json",
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json()["answer"], "公开答案")
+        self.assertNotIn("private", response.content.decode("utf-8"))
+
+    @override_settings(DIFY_API_KEY=api_key, DIFY_API_BASE_URL=base_url)
     def test_continuation_forwards_conversation_id(self):
         post = self.mock_response({"answer": "next"})
 

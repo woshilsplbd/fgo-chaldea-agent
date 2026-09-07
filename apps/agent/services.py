@@ -1,3 +1,5 @@
+import re
+
 import requests
 from django.conf import settings
 
@@ -8,6 +10,23 @@ class AgentNotConfiguredError(Exception):
 
 class AgentServiceError(Exception):
     """Raised for controlled failures from a configured Agent provider."""
+
+
+_THINK_BLOCK_RE = re.compile(r"<think\b[^>]*>.*?</think\s*>", re.IGNORECASE | re.DOTALL)
+_UNCLOSED_THINK_RE = re.compile(r"<think\b[^>]*>.*\Z", re.IGNORECASE | re.DOTALL)
+_REASONING_MARKER_RE = re.compile(
+    r"[ \t]*<!--\s*dify-deepseek-reasoning\s*-->[ \t]*",
+    re.IGNORECASE,
+)
+
+
+def sanitize_answer(answer):
+    """Remove provider reasoning markup from a user-visible answer."""
+    sanitized = _THINK_BLOCK_RE.sub("", answer)
+    sanitized = _UNCLOSED_THINK_RE.sub("", sanitized)
+    sanitized = _REASONING_MARKER_RE.sub(" ", sanitized)
+    sanitized = re.sub(r"\n(?:[ \t]*\n){2,}", "\n\n", sanitized)
+    return sanitized.strip()
 
 
 def chat(message, conversation_id=None):
@@ -50,6 +69,10 @@ def chat(message, conversation_id=None):
     if not isinstance(data, dict) or not isinstance(data.get("answer"), str):
         raise AgentServiceError("Dify returned an invalid chat response")
 
+    answer = sanitize_answer(data["answer"])
+    if not answer:
+        raise AgentServiceError("Dify returned an empty chat response")
+
     conversation_id = data.get("conversation_id")
     message_id = data.get("message_id")
     if conversation_id is not None and not isinstance(conversation_id, str):
@@ -58,7 +81,7 @@ def chat(message, conversation_id=None):
         raise AgentServiceError("Dify returned an invalid message ID")
 
     return {
-        "answer": data["answer"],
+        "answer": answer,
         "conversation_id": conversation_id,
         "message_id": message_id,
     }
