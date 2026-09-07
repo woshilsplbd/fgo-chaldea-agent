@@ -112,7 +112,7 @@
                     </div>
 
                     <form id="agent-composer" class="input-group" method="post"
-                        action="{% url 'agent_api:chat' %}">
+                        action="{% url 'agent_api:chat_stream' %}">
                         {% csrf_token %}
                         <label class="sr-only" for="agent-input">输入问题</label>
                         <input id="agent-input" class="form-control" type="text" name="message"
@@ -192,6 +192,7 @@
             message.appendChild(body);
             messages.appendChild(message);
             message.scrollIntoView({ block: "nearest" });
+            return { message: message, body: body };
         }
 
         function setStatus(message, state) {
@@ -205,50 +206,158 @@
             sendButton.disabled = isBusy;
         }
 
-        composer.addEventListener("submit", function (event) {
-            event.preventDefault();
-            const message = input.value.trim();
-            if (!message || sendButton.disabled) return;
+        function parseSseFrame(frame, dispatch) {
+            let eventType = "message";
+            const dataLines = [];
+            frame.split("\n").forEach(function (line) {
+                if (line.indexOf("event:") === 0) {
+                    eventType = line.slice(6).trim();
+                } else if (line.indexOf("data:") === 0) {
+                    dataLines.push(line.slice(5).replace(/^ /, ""));
+                }
+            });
+            if (!dataLines.length) return;
+            try {
+                dispatch(eventType, JSON.parse(dataLines.join("\n")));
+            } catch (error) {
+                // Ignore malformed frames; the stream completion check reports
+                // an interrupted response if no valid done/error event arrives.
+            }
+        }
 
+        async function readStream(response, handleEvent) {
+            if (!response.body || !response.body.getReader) {
+                throw new Error("stream_unavailable");
+            }
+
+            const reader = response.body.getReader();
+            const decoder = new TextDecoder("utf-8");
+            let buffer = "";
+            let completed = false;
+            let failed = false;
+
+            function consume(text) {
+                buffer += text.replace(/\r\n/g, "\n").replace(/\r/g, "\n");
+                const frames = buffer.split("\n\n");
+                buffer = frames.pop();
+                frames.forEach(function (frame) {
+                    parseSseFrame(frame, function (eventType, data) {
+                        if (failed && eventType !== "error") return;
+                        if (eventType === "done") completed = true;
+                        if (eventType === "error") failed = true;
+                        handleEvent(eventType, data);
+                    });
+                });
+            }
+
+            while (true) {
+                const result = await reader.read();
+                if (result.done) break;
+                consume(decoder.decode(result.value, { stream: true }));
+            }
+            consume(decoder.decode());
+            if (buffer.trim()) {
+                parseSseFrame(buffer, function (eventType, data) {
+                    if (failed && eventType !== "error") return;
+                    if (eventType === "done") completed = true;
+                    if (eventType === "error") failed = true;
+                    handleEvent(eventType, data);
+                });
+            }
+            return { completed: completed, failed: failed };
+        }
+
+        function scrollMessages() {
+            messages.scrollTop = messages.scrollHeight;
+        }
+
+        async function submitMessage(message) {
             addMessage("你", message, "agent-user-message", false);
+            const assistant = addMessage("Agent", "", "agent-assistant-message", false);
+            assistant.body.style.whiteSpace = "pre-wrap";
             input.value = "";
-            setStatus("正在连接 Agent 服务……", "pending");
+            setStatus("Agent 正在思考……", "pending");
             setBusy(true);
 
             const payload = { message: message };
             if (conversationId) payload.conversation_id = conversationId;
+            let assistantText = "";
+            let streamError = false;
 
-            fetch(endpoint, {
-                method: "POST",
-                headers: {
-                    "Content-Type": "application/json",
-                    "X-CSRFToken": csrfToken
-                },
-                body: JSON.stringify(payload)
-            })
-                .then(function (response) {
-                    return response.json().then(function (data) {
-                        return { response: response, data: data };
-                    });
-                })
-                .then(function (result) {
-                    const data = result.data;
-                    if (!result.response.ok || !data.ok) {
-                        setStatus(data.message || "Agent 服务暂时不可用。", "error");
-                        return;
-                    }
-
-                    conversationId = data.conversation_id || null;
-                    addMessage("Agent", data.answer || "", "agent-assistant-message", true);
-                    setStatus("Agent 服务已连接。", "connected");
-                })
-                .catch(function () {
-                    setStatus("Agent 服务暂时不可用，请稍后重试。", "error");
-                })
-                .finally(function () {
-                    setBusy(false);
-                    input.focus();
+            try {
+                const response = await fetch(endpoint, {
+                    method: "POST",
+                    headers: {
+                        "Content-Type": "application/json",
+                        "X-CSRFToken": csrfToken
+                    },
+                    body: JSON.stringify(payload)
                 });
+
+                if (!response.ok) {
+                    let messageText = "Agent 服务暂时不可用，请稍后重试。";
+                    try {
+                        const data = await response.json();
+                        const knownCodes = ["agent_not_configured", "agent_stream_error", "invalid_request", "method_not_allowed"];
+                        if (
+                            data &&
+                            knownCodes.indexOf(data.code) !== -1 &&
+                            typeof data.message === "string"
+                        ) {
+                            messageText = data.message;
+                        }
+                    } catch (error) {
+                        // Ignore non-JSON error bodies such as proxy HTML.
+                    }
+                    setStatus(messageText, "error");
+                    return;
+                }
+
+                const result = await readStream(response, function (eventType, data) {
+                    if (!data || typeof data !== "object") return;
+                    if (eventType === "start") {
+                        setStatus("Agent 正在思考……", "pending");
+                    } else if (eventType === "delta" && typeof data.text === "string") {
+                        assistantText += data.text;
+                        assistant.body.textContent = assistantText;
+                        setStatus("Agent 正在输出……", "pending");
+                        scrollMessages();
+                    } else if (eventType === "done") {
+                        if (
+                            (data.conversation_id !== null && typeof data.conversation_id !== "string") ||
+                            (data.message_id !== null && typeof data.message_id !== "string") ||
+                            !assistantText.trim()
+                        ) {
+                            streamError = true;
+                            return;
+                        }
+                        conversationId = data.conversation_id || null;
+                        assistant.body.className = "agent-markdown";
+                        assistant.body.style.whiteSpace = "";
+                        assistant.body.innerHTML = renderMarkdown(assistantText);
+                        setStatus("Agent 服务已连接。", "connected");
+                        scrollMessages();
+                    } else if (eventType === "error") {
+                        streamError = true;
+                    }
+                });
+
+                if (streamError || result.failed || !result.completed) {
+                    setStatus("Agent 服务暂时不可用，请稍后重试。", "error");
+                }
+            } catch (error) {
+                setStatus("Agent 服务暂时不可用，请稍后重试。", "error");
+            } finally {
+                setBusy(false);
+                input.focus();
+            }
+        }
+
+        composer.addEventListener("submit", function (event) {
+            event.preventDefault();
+            const message = input.value.trim();
+            if (!message || sendButton.disabled) return;
+            submitMessage(message);
         });
     }());
 </script>
