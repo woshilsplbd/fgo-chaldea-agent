@@ -4,6 +4,7 @@ from django.http import JsonResponse, StreamingHttpResponse
 from django.shortcuts import render
 
 from . import services
+from .identity import attach_identity_cookie, resolve_identity
 
 
 MAX_MESSAGE_LENGTH = 2000
@@ -89,23 +90,30 @@ def chat_api(request):
     if error:
         return error
     message, conversation_id = parsed
+    identity = resolve_identity(request)
 
     try:
-        result = services.chat(message, conversation_id=conversation_id)
+        result = services.chat(
+            message,
+            conversation_id=conversation_id,
+            user_id=identity.provider_user_id,
+        )
     except services.AgentNotConfiguredError:
-        return _error_response(
+        response = _error_response(
             "agent_not_configured",
             "Agent service is not configured.",
             503,
         )
+        return attach_identity_cookie(response, identity)
     except Exception:
-        return _error_response(
+        response = _error_response(
             "agent_service_error",
             "Agent service is temporarily unavailable.",
             502,
         )
+        return attach_identity_cookie(response, identity)
 
-    return JsonResponse(
+    response = JsonResponse(
         {
             "ok": True,
             "answer": result.get("answer"),
@@ -113,6 +121,7 @@ def chat_api(request):
             "message_id": result.get("message_id"),
         }
     )
+    return attach_identity_cookie(response, identity)
 
 
 def _sse_event(event_type, payload):
@@ -122,11 +131,15 @@ def _sse_event(event_type, payload):
     )
 
 
-def _stream_chat_events(message, conversation_id):
+def _stream_chat_events(message, conversation_id, user_id):
     yield _sse_event("start", {"ok": True})
     upstream = None
     try:
-        upstream = services.stream_chat(message, conversation_id=conversation_id)
+        upstream = services.stream_chat(
+            message,
+            conversation_id=conversation_id,
+            user_id=user_id,
+        )
         completed = False
         for event in upstream:
             if not isinstance(event, dict):
@@ -200,11 +213,12 @@ def chat_stream_api(request):
     if error:
         return error
     message, conversation_id = parsed
+    identity = resolve_identity(request)
 
     response = StreamingHttpResponse(
-        _stream_chat_events(message, conversation_id),
+        _stream_chat_events(message, conversation_id, identity.provider_user_id),
         content_type="text/event-stream; charset=utf-8",
     )
     response["Cache-Control"] = "no-cache"
     response["X-Accel-Buffering"] = "no"
-    return response
+    return attach_identity_cookie(response, identity)

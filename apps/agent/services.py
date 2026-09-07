@@ -29,8 +29,10 @@ def sanitize_answer(answer):
     return sanitized.strip()
 
 
-def chat(message, conversation_id=None):
+def chat(message, conversation_id=None, *, user_id):
     """Send one blocking chat turn through the configured Dify provider."""
+    if not isinstance(user_id, str) or not user_id.strip():
+        raise AgentServiceError("Agent user identity is unavailable")
     base_url = (getattr(settings, "DIFY_API_BASE_URL", "") or "").strip().rstrip("/")
     api_key = (getattr(settings, "DIFY_API_KEY", "") or "").strip()
     if not base_url or not api_key:
@@ -40,7 +42,7 @@ def chat(message, conversation_id=None):
         "inputs": {},
         "query": message,
         "response_mode": "blocking",
-        "user": "chaldea-agent-dev",
+        "user": user_id,
     }
     if conversation_id:
         payload["conversation_id"] = conversation_id
@@ -87,8 +89,8 @@ def chat(message, conversation_id=None):
     }
 
 
-def stream_chat(message, conversation_id=None):
+def stream_chat(message, conversation_id=None, *, user_id):
     """Return the production streaming service iterator."""
     from .streaming import stream_chat as _stream_chat
 
-    return _stream_chat(message, conversation_id=conversation_id)
+    return _stream_chat(message, conversation_id=conversation_id, user_id=user_id)

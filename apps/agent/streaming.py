@@ -153,14 +153,16 @@ def _configured_provider():
     return base_url, api_key
 
 
-def stream_chat(message, conversation_id=None):
+def stream_chat(message, conversation_id=None, *, user_id):
     """Return an iterator of safe answer deltas and a final completion event."""
+    if not isinstance(user_id, str) or not user_id.strip():
+        raise AgentServiceError("Agent user identity is unavailable")
     base_url, api_key = _configured_provider()
     payload = {
         "inputs": {},
         "query": message,
         "response_mode": "streaming",
-        "user": "chaldea-agent-dev",
+        "user": user_id,
     }
     if conversation_id:
         payload["conversation_id"] = conversation_id

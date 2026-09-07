@@ -12,6 +12,7 @@ from django.urls import reverse
 
 from . import services
 from . import streaming
+from . import identity
 from .management.commands import evaluate_agent
 
 
@@ -94,6 +95,149 @@ class AgentChatPageTests(TestCase):
         self.assertContains(response, 'href="/agent/"')
 
 
+class AnonymousIdentityTests(TestCase):
+    def post_json(self, client=None):
+        client = client or self.client
+        return client.post(
+            reverse("agent_api:chat"),
+            data=json.dumps({"message": "hello"}),
+            content_type="application/json",
+        )
+
+    @override_settings(DEBUG=True)
+    @patch("apps.agent.views.services.chat")
+    def test_missing_cookie_creates_signed_identity(self, chat):
+        chat.return_value = {"answer": "safe", "conversation_id": None, "message_id": None}
+
+        response = self.post_json()
+        cookie = response.cookies[identity.ANONYMOUS_COOKIE_NAME]
+
+        self.assertTrue(cookie["httponly"])
+        self.assertEqual(cookie["samesite"], "Lax")
+        self.assertEqual(cookie["path"], "/")
+        self.assertEqual(int(cookie["max-age"]), identity.ANONYMOUS_COOKIE_MAX_AGE)
+        self.assertFalse(cookie["secure"])
+        provider_user = chat.call_args.kwargs["user_id"]
+        self.assertRegex(provider_user, r"\Achaldea-web:[0-9a-f]{32}\Z")
+        self.assertEqual(
+            identity.signing.loads(
+                cookie.value,
+                salt=identity.ANONYMOUS_COOKIE_SALT,
+                max_age=identity.ANONYMOUS_COOKIE_MAX_AGE,
+            ),
+            provider_user.split(":", 1)[1],
+        )
+
+    @patch("apps.agent.views.services.chat")
+    def test_same_client_reuses_identity_and_different_clients_are_isolated(self, chat):
+        chat.return_value = {"answer": "safe", "conversation_id": None, "message_id": None}
+
+        self.post_json()
+        first_user = chat.call_args.kwargs["user_id"]
+        self.post_json()
+        second_user = chat.call_args.kwargs["user_id"]
+        other_client = Client()
+        self.post_json(other_client)
+        other_user = chat.call_args.kwargs["user_id"]
+
+        self.assertEqual(first_user, second_user)
+        self.assertNotEqual(first_user, other_user)
+
+    @patch("apps.agent.views.services.chat")
+    def test_tampered_or_malformed_cookie_is_replaced(self, chat):
+        chat.return_value = {"answer": "safe", "conversation_id": None, "message_id": None}
+
+        self.post_json()
+        original_user = chat.call_args.kwargs["user_id"]
+        self.client.cookies[identity.ANONYMOUS_COOKIE_NAME] = "tampered"
+        tampered_response = self.post_json()
+        tampered_user = chat.call_args.kwargs["user_id"]
+        self.client.cookies[identity.ANONYMOUS_COOKIE_NAME] = identity.signing.dumps(
+            "not-a-valid-opaque-id", salt=identity.ANONYMOUS_COOKIE_SALT
+        )
+        malformed_response = self.post_json()
+        malformed_user = chat.call_args.kwargs["user_id"]
+        self.client.cookies[identity.ANONYMOUS_COOKIE_NAME] = identity.signing.dumps(
+            {"id": "not-a-valid-payload"}, salt=identity.ANONYMOUS_COOKIE_SALT
+        )
+        invalid_shape_response = self.post_json()
+        invalid_shape_user = chat.call_args.kwargs["user_id"]
+
+        self.assertNotEqual(original_user, tampered_user)
+        self.assertNotEqual(tampered_user, malformed_user)
+        self.assertNotEqual(malformed_user, invalid_shape_user)
+        self.assertIn(identity.ANONYMOUS_COOKIE_NAME, tampered_response.cookies)
+        self.assertIn(identity.ANONYMOUS_COOKIE_NAME, malformed_response.cookies)
+        self.assertIn(identity.ANONYMOUS_COOKIE_NAME, invalid_shape_response.cookies)
+
+    @override_settings(DEBUG=False)
+    @patch("apps.agent.views.services.chat")
+    def test_cookie_is_secure_when_debug_is_disabled(self, chat):
+        chat.return_value = {"answer": "safe", "conversation_id": None, "message_id": None}
+
+        response = self.post_json()
+
+        self.assertTrue(response.cookies[identity.ANONYMOUS_COOKIE_NAME]["secure"])
+
+    @patch("apps.agent.views.services.chat")
+    def test_client_cannot_choose_provider_identity(self, chat):
+        chat.return_value = {"answer": "safe", "conversation_id": None, "message_id": None}
+
+        response = self.client.post(
+            reverse("agent_api:chat"),
+            data=json.dumps({"message": "hello", "user": "attacker", "user_id": "attacker"}),
+            content_type="application/json",
+        )
+
+        self.assertEqual(response.status_code, 200)
+        provider_user = chat.call_args.kwargs["user_id"]
+        self.assertNotEqual(provider_user, "attacker")
+        self.assertRegex(provider_user, r"\Achaldea-web:[0-9a-f]{32}\Z")
+
+    @patch("apps.agent.views.services.stream_chat")
+    def test_streaming_sets_identity_cookie_before_iteration(self, stream_chat):
+        stream_chat.return_value = iter(
+            [
+                {"type": "delta", "text": "safe"},
+                {"type": "done", "conversation_id": "conversation-1", "message_id": "message-1"},
+            ]
+        )
+
+        response = self.client.post(
+            reverse("agent_api:chat_stream"),
+            data=json.dumps({"message": "hello"}),
+            content_type="application/json",
+        )
+
+        self.assertIn(identity.ANONYMOUS_COOKIE_NAME, response.cookies)
+        body = b"".join(response.streaming_content).decode("utf-8")
+        self.assertRegex(
+            stream_chat.call_args.kwargs["user_id"], r"\Achaldea-web:[0-9a-f]{32}\Z"
+        )
+        self.assertIn('event: done\ndata: {"conversation_id":"conversation-1","message_id":"message-1"}', body)
+
+    @patch("apps.agent.views.services.stream_chat")
+    @patch("apps.agent.views.services.chat")
+    def test_blocking_and_streaming_share_identity(self, chat, stream_chat):
+        chat.return_value = {"answer": "safe", "conversation_id": None, "message_id": None}
+        stream_chat.return_value = iter(
+            [{"type": "delta", "text": "safe"}, {"type": "done", "conversation_id": None, "message_id": None}]
+        )
+
+        self.post_json()
+        stream_response = self.client.post(
+            reverse("agent_api:chat_stream"),
+            data=json.dumps({"message": "hello"}),
+            content_type="application/json",
+        )
+        b"".join(stream_response.streaming_content)
+
+        self.assertEqual(
+            chat.call_args.kwargs["user_id"],
+            stream_chat.call_args.kwargs["user_id"],
+        )
+
+
 class AgentChatApiTests(TestCase):
     api_url = reverse("agent_api:chat")
     stream_api_url = reverse("agent_api:chat_stream")
@@ -128,7 +272,10 @@ class AgentChatApiTests(TestCase):
                 "message_id": "message-9",
             },
         )
-        chat.assert_called_once_with("hello FGO", conversation_id="conversation-1")
+        chat.assert_called_once()
+        self.assertEqual(chat.call_args.args, ("hello FGO",))
+        self.assertEqual(chat.call_args.kwargs["conversation_id"], "conversation-1")
+        self.assertTrue(chat.call_args.kwargs["user_id"].startswith("chaldea-web:"))
 
     def test_missing_message_returns_invalid_request(self):
         response = self.post_json({})
@@ -263,7 +410,10 @@ class AgentChatApiTests(TestCase):
             body,
         )
         self.assertEqual(body.count("\n\n"), 3)
-        stream_chat.assert_called_once_with("hello FGO", conversation_id="conversation-1")
+        stream_chat.assert_called_once()
+        self.assertEqual(stream_chat.call_args.args, ("hello FGO",))
+        self.assertEqual(stream_chat.call_args.kwargs["conversation_id"], "conversation-1")
+        self.assertTrue(stream_chat.call_args.kwargs["user_id"].startswith("chaldea-web:"))
 
     def test_stream_get_is_rejected_with_json_error(self):
         response = self.client.get(self.stream_api_url)
@@ -350,6 +500,7 @@ class AgentChatApiTests(TestCase):
 class DifyServiceTests(TestCase):
     base_url = "https://dify.example/v1/"
     api_key = "test-dify-key"
+    user_id = "chaldea-web:test-user"
 
     def mock_response(self, payload=None, json_error=None):
         response = patch("apps.agent.services.requests.post").start()
@@ -364,12 +515,12 @@ class DifyServiceTests(TestCase):
     @override_settings(DIFY_API_KEY="", DIFY_API_BASE_URL=base_url)
     def test_missing_api_key_raises_not_configured(self):
         with self.assertRaises(services.AgentNotConfiguredError):
-            services.chat("hello")
+            services.chat("hello", user_id=self.user_id)
 
     @override_settings(DIFY_API_KEY=api_key, DIFY_API_BASE_URL="")
     def test_missing_base_url_raises_not_configured(self):
         with self.assertRaises(services.AgentNotConfiguredError):
-            services.chat("hello")
+            services.chat("hello", user_id=self.user_id)
 
     @override_settings(
         DIFY_API_KEY=api_key,
@@ -381,7 +532,7 @@ class DifyServiceTests(TestCase):
             {"answer": "answer", "conversation_id": "conv", "message_id": "msg"}
         )
 
-        result = services.chat("hello")
+        result = services.chat("hello", user_id=self.user_id)
 
         self.assertEqual(result["answer"], "answer")
         post.assert_called_once()
@@ -400,7 +551,7 @@ class DifyServiceTests(TestCase):
                 "inputs": {},
                 "query": "hello",
                 "response_mode": "blocking",
-                "user": "chaldea-agent-dev",
+                "user": self.user_id,
             },
         )
         self.assertNotIn("test-dify-key", json.dumps(kwargs["json"]))
@@ -417,7 +568,7 @@ class DifyServiceTests(TestCase):
             }
         )
 
-        result = services.chat("hello")
+        result = services.chat("hello", user_id=self.user_id)
 
         self.assertEqual(
             result["answer"],
@@ -437,7 +588,7 @@ class DifyServiceTests(TestCase):
             }
         )
 
-        result = services.chat("hello")
+        result = services.chat("hello", user_id=self.user_id)
 
         self.assertEqual(result["answer"], "Intro\n\nMiddle\n\nFinal")
         self.assertNotIn("<think>", result["answer"])
@@ -447,7 +598,7 @@ class DifyServiceTests(TestCase):
     def test_normal_answer_is_unchanged(self):
         self.mock_response({"answer": "Normal **Markdown**\n\nhttps://example.com"})
 
-        result = services.chat("hello")
+        result = services.chat("hello", user_id=self.user_id)
 
         self.assertEqual(result["answer"], "Normal **Markdown**\n\nhttps://example.com")
 
@@ -458,7 +609,7 @@ class DifyServiceTests(TestCase):
         )
 
         with self.assertRaises(services.AgentServiceError) as context:
-            services.chat("hello")
+            services.chat("hello", user_id=self.user_id)
 
         self.assertNotIn("only private thoughts", str(context.exception))
 
@@ -485,7 +636,9 @@ class DifyServiceTests(TestCase):
     def test_continuation_forwards_conversation_id(self):
         post = self.mock_response({"answer": "next"})
 
-        result = services.chat("follow up", conversation_id="conversation-1")
+        result = services.chat(
+            "follow up", conversation_id="conversation-1", user_id=self.user_id
+        )
 
         self.assertEqual(result, {
             "answer": "next",
@@ -500,7 +653,7 @@ class DifyServiceTests(TestCase):
         post.side_effect = requests.Timeout("private timeout")
 
         with self.assertRaises(services.AgentServiceError):
-            services.chat("hello")
+            services.chat("hello", user_id=self.user_id)
 
     @override_settings(DIFY_API_KEY=api_key, DIFY_API_BASE_URL=base_url)
     def test_connection_failure_raises_controlled_service_error(self):
@@ -508,7 +661,7 @@ class DifyServiceTests(TestCase):
         post.side_effect = requests.ConnectionError("private connection")
 
         with self.assertRaises(services.AgentServiceError):
-            services.chat("hello")
+            services.chat("hello", user_id=self.user_id)
 
     @override_settings(DIFY_API_KEY=api_key, DIFY_API_BASE_URL=base_url)
     def test_non_2xx_raises_controlled_service_error(self):
@@ -516,21 +669,21 @@ class DifyServiceTests(TestCase):
         post.return_value.raise_for_status.side_effect = requests.HTTPError("private body")
 
         with self.assertRaises(services.AgentServiceError):
-            services.chat("hello")
+            services.chat("hello", user_id=self.user_id)
 
     @override_settings(DIFY_API_KEY=api_key, DIFY_API_BASE_URL=base_url)
     def test_malformed_json_raises_controlled_service_error(self):
         self.mock_response(json_error=ValueError("private body"))
 
         with self.assertRaises(services.AgentServiceError):
-            services.chat("hello")
+            services.chat("hello", user_id=self.user_id)
 
     @override_settings(DIFY_API_KEY=api_key, DIFY_API_BASE_URL=base_url)
     def test_invalid_success_payload_raises_controlled_service_error(self):
         self.mock_response({"answer": {"unexpected": True}})
 
         with self.assertRaises(services.AgentServiceError):
-            services.chat("hello")
+            services.chat("hello", user_id=self.user_id)
 
     @override_settings(DIFY_API_KEY=api_key, DIFY_API_BASE_URL=base_url)
     @patch("apps.agent.services.requests.post")
@@ -555,6 +708,7 @@ class DifyServiceTests(TestCase):
 class AgentStreamingServiceTests(TestCase):
     base_url = "https://dify.example/v1"
     api_key = "test-dify-key"
+    user_id = "chaldea-web:test-user"
 
     def make_response(self, events):
         response = Mock()
@@ -588,7 +742,7 @@ class AgentStreamingServiceTests(TestCase):
             )
         )
 
-        result = list(streaming.stream_chat("hello"))
+        result = list(streaming.stream_chat("hello", user_id=self.user_id))
 
         self.assertEqual(
             result,
@@ -611,7 +765,7 @@ class AgentStreamingServiceTests(TestCase):
                 "inputs": {},
                 "query": "hello",
                 "response_mode": "streaming",
-                "user": "chaldea-agent-dev",
+                "user": self.user_id,
             },
             timeout=30.0,
             stream=True,
@@ -638,7 +792,11 @@ class AgentStreamingServiceTests(TestCase):
             )
         )
 
-        result = list(streaming.stream_chat("follow up", conversation_id="conversation-1"))
+        result = list(
+            streaming.stream_chat(
+                "follow up", conversation_id="conversation-1", user_id=self.user_id
+            )
+        )
 
         self.assertEqual(result[0], {"type": "delta", "text": "answer"})
         self.assertEqual(result[-1]["conversation_id"], "conversation-2")
@@ -659,7 +817,7 @@ class AgentStreamingServiceTests(TestCase):
             )
         )
 
-        result = list(streaming.stream_chat("question"))
+        result = list(streaming.stream_chat("question", user_id=self.user_id))
 
         self.assertEqual(result, [{"type": "delta", "text": "公开 **答案** https://example.com"}, {"type": "done", "conversation_id": "c", "message_id": None}])
         self.assertNotIn("private", json.dumps(result))
@@ -682,7 +840,7 @@ class AgentStreamingServiceTests(TestCase):
         )
 
         with self.assertRaisesRegex(services.AgentServiceError, "reported an error") as context:
-            list(streaming.stream_chat("question"))
+            list(streaming.stream_chat("question", user_id=self.user_id))
 
         self.assertNotIn("private provider body", str(context.exception))
         self.assertNotIn(self.api_key, str(context.exception))
@@ -691,13 +849,13 @@ class AgentStreamingServiceTests(TestCase):
     @patch("apps.agent.streaming.requests.post", side_effect=requests.Timeout("private timeout"))
     def test_stream_timeout_is_controlled(self, post):
         with self.assertRaisesRegex(services.AgentServiceError, "timed out"):
-            streaming.stream_chat("question")
+            streaming.stream_chat("question", user_id=self.user_id)
 
     @override_settings(DIFY_API_BASE_URL=base_url, DIFY_API_KEY=api_key)
     @patch("apps.agent.streaming.requests.post", side_effect=requests.ConnectionError("private connection"))
     def test_stream_connection_failure_is_controlled(self, post):
         with self.assertRaisesRegex(services.AgentServiceError, "request failed"):
-            streaming.stream_chat("question")
+            streaming.stream_chat("question", user_id=self.user_id)
 
     @override_settings(DIFY_API_BASE_URL=base_url, DIFY_API_KEY=api_key)
     @patch("apps.agent.streaming.requests.post")
@@ -707,7 +865,7 @@ class AgentStreamingServiceTests(TestCase):
         )
 
         with self.assertRaisesRegex(services.AgentServiceError, "before message_end"):
-            list(streaming.stream_chat("question"))
+            list(streaming.stream_chat("question", user_id=self.user_id))
 
     @override_settings(DIFY_API_BASE_URL=base_url, DIFY_API_KEY=api_key)
     @patch("apps.agent.streaming.requests.post")
@@ -722,7 +880,7 @@ class AgentStreamingServiceTests(TestCase):
         )
 
         with self.assertRaisesRegex(services.AgentServiceError, "empty chat response"):
-            list(streaming.stream_chat("question"))
+            list(streaming.stream_chat("question", user_id=self.user_id))
 
     @override_settings(DIFY_API_BASE_URL=base_url, DIFY_API_KEY=api_key)
     @patch("apps.agent.streaming.requests.post")
@@ -754,7 +912,7 @@ class AgentStreamingServiceTests(TestCase):
         )
 
         self.assertEqual(
-            list(streaming.stream_chat("question")),
+            list(streaming.stream_chat("question", user_id=self.user_id)),
             [
                 {"type": "delta", "text": "structured final answer"},
                 {
@@ -793,7 +951,7 @@ class AgentStreamingServiceTests(TestCase):
             )
         )
 
-        result = list(streaming.stream_chat("question"))
+        result = list(streaming.stream_chat("question", user_id=self.user_id))
 
         self.assertEqual(result[0], {"type": "delta", "text": "answer after end"})
         self.assertEqual(result[-1]["conversation_id"], "conversation-2")
@@ -825,7 +983,7 @@ class AgentStreamingServiceTests(TestCase):
                         ]
                     )
                 )
-                result = list(streaming.stream_chat("question"))
+                result = list(streaming.stream_chat("question", user_id=self.user_id))
                 self.assertEqual(result[0]["text"], f"from {field}")
 
     @override_settings(DIFY_API_BASE_URL=base_url, DIFY_API_KEY=api_key)
@@ -859,7 +1017,7 @@ class AgentStreamingServiceTests(TestCase):
             )
         )
 
-        result = list(streaming.stream_chat("question"))
+        result = list(streaming.stream_chat("question", user_id=self.user_id))
 
         self.assertEqual(result[0], {"type": "delta", "text": "streamed answer"})
         self.assertNotIn("duplicate fallback", json.dumps(result))
@@ -890,7 +1048,7 @@ class AgentStreamingServiceTests(TestCase):
         )
 
         with self.assertRaisesRegex(services.AgentServiceError, "empty chat response"):
-            list(streaming.stream_chat("question"))
+            list(streaming.stream_chat("question", user_id=self.user_id))
 
     @override_settings(DIFY_API_BASE_URL=base_url, DIFY_API_KEY=api_key)
     @patch("apps.agent.streaming.requests.post")
@@ -919,7 +1077,7 @@ class AgentStreamingServiceTests(TestCase):
             )
         )
 
-        result = list(streaming.stream_chat("question"))
+        result = list(streaming.stream_chat("question", user_id=self.user_id))
 
         self.assertEqual(
             result[0],
@@ -956,7 +1114,7 @@ class AgentStreamingServiceTests(TestCase):
         )
 
         with self.assertRaisesRegex(services.AgentServiceError, "empty chat response"):
-            list(streaming.stream_chat("question"))
+            list(streaming.stream_chat("question", user_id=self.user_id))
 
     def test_stateful_sanitizer_preserves_visible_text_and_split_controls(self):
         sanitizer = streaming.ReasoningSanitizer()
