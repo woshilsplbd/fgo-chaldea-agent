@@ -11,7 +11,13 @@ import re
 import requests
 from django.conf import settings
 
-from .services import AgentNotConfiguredError, AgentServiceError
+from .services import (
+    AgentNotConfiguredError,
+    AgentServiceError,
+    ConversationUnavailableError,
+    _is_conversation_unavailable_payload,
+    _raise_for_status,
+)
 
 
 _OPEN_THINK_RE = re.compile(r"<think\b[^>]*>", re.IGNORECASE)
@@ -223,7 +229,12 @@ def stream_chat(message, conversation_id=None, *, user_id):
             timeout=getattr(settings, "DIFY_TIMEOUT_SECONDS", 30.0),
             stream=True,
         )
-        response.raise_for_status()
+        _raise_for_status(response)
+    except ConversationUnavailableError:
+        close = getattr(locals().get("response"), "close", None)
+        if callable(close):
+            close()
+        raise
     except requests.Timeout as exc:
         close = getattr(locals().get("response"), "close", None)
         if callable(close):
@@ -290,6 +301,19 @@ def stream_chat(message, conversation_id=None, *, user_id):
                     if answer is not None:
                         answer_node_candidates.append(answer)
                 elif event_name == "error":
+                    error_payloads = (data, event) if data else (event,)
+                    if any(
+                        _is_conversation_unavailable_payload(
+                            error_payload,
+                            status_code=(
+                                error_payload.get("status")
+                                if isinstance(error_payload, dict)
+                                else None
+                            ),
+                        )
+                        for error_payload in error_payloads
+                    ):
+                        raise ConversationUnavailableError
                     raise AgentServiceError("Dify streaming response reported an error")
                 # workflow/node/tool events are intentionally ignored.
 

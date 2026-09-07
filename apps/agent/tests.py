@@ -40,7 +40,10 @@ class AgentChatPageTests(TestCase):
         self.assertContains(response, 'eventType === "error"')
         self.assertContains(response, "assistant.body.textContent = assistantText")
         self.assertContains(response, "assistant.body.innerHTML = renderMarkdown(assistantText)")
-        self.assertContains(response, "if (!message || sendButton.disabled) return")
+        self.assertContains(
+            response,
+            "if (!message || sendButton.disabled || conversationRecoveryRequired) return",
+        )
         self.assertContains(response, "conversationId = data.conversation_id || null")
         self.assertContains(response, "target=\"_blank\"")
         self.assertContains(response, "agent-ordered-item")
@@ -72,7 +75,13 @@ class AgentChatPageTests(TestCase):
         self.assertContains(response, "window.localStorage.removeItem(localStorageKey)")
         self.assertContains(response, "function resetLocalState()")
         self.assertContains(response, "newChatButton.disabled = isBusy")
-        self.assertContains(response, "if (sendButton.disabled) return")
+        self.assertContains(response, "let conversationRecoveryRequired = false")
+        self.assertContains(response, 'data.code === "conversation_unavailable"')
+        self.assertContains(response, "conversationRecoveryRequired = true")
+        self.assertContains(response, "conversationId = null")
+        self.assertContains(response, "当前会话已失效，请点击“新对话”重新开始。")
+        self.assertContains(response, "conversationRecoveryRequired = false")
+        self.assertContains(response, "if (newChatButton.disabled) return")
 
         done_index = content.index('} else if (eventType === "done")')
         assistant_persist_index = content.index(
@@ -353,6 +362,16 @@ class AgentChatApiTests(TestCase):
         self.assertNotIn("RuntimeError", body)
         self.assertNotIn("Traceback", body)
 
+    @patch("apps.agent.views.services.chat")
+    def test_conversation_unavailable_returns_controlled_conflict(self, chat):
+        chat.side_effect = services.ConversationUnavailableError
+
+        response = self.post_json({"message": "hello", "conversation_id": "stale"})
+
+        self.assertEqual(response.status_code, 409)
+        self.assertEqual(response.json()["code"], "conversation_unavailable")
+        self.assertNotIn("ConversationUnavailableError", response.content.decode("utf-8"))
+
     def test_get_is_rejected_with_controlled_json_error(self):
         response = self.client.get(self.api_url)
 
@@ -469,6 +488,19 @@ class AgentChatApiTests(TestCase):
         )
         self.assertNotIn("private provider body", body)
         self.assertNotIn("done", body)
+
+    @patch("apps.agent.views.services.stream_chat")
+    def test_stream_conversation_unavailable_emits_specific_error_without_done(
+        self, stream_chat
+    ):
+        stream_chat.side_effect = services.ConversationUnavailableError
+
+        body = self.stream_body(self.post_stream_json({"message": "hello"}))
+
+        self.assertIn('event: start\ndata: {"ok":true}\n\n', body)
+        self.assertIn('"code":"conversation_unavailable"', body)
+        self.assertNotIn("done", body)
+        self.assertNotIn("ConversationUnavailableError", body)
 
     @patch("apps.agent.views.services.stream_chat")
     def test_stream_ignores_unknown_internal_events(self, stream_chat):
@@ -670,6 +702,42 @@ class DifyServiceTests(TestCase):
 
         with self.assertRaises(services.AgentServiceError):
             services.chat("hello", user_id=self.user_id)
+
+    @override_settings(DIFY_API_KEY=api_key, DIFY_API_BASE_URL=base_url)
+    def test_structured_stale_conversation_maps_to_specific_error(self):
+        post = self.mock_response()
+        post.return_value.status_code = 404
+        post.return_value.json.return_value = {
+            "code": "not_found",
+            "message": "Conversation Not Exists.",
+            "status": 404,
+        }
+        error = requests.HTTPError("private provider body")
+        error.response = post.return_value
+        post.return_value.raise_for_status.side_effect = error
+
+        with self.assertRaises(services.ConversationUnavailableError):
+            services.chat("hello", conversation_id="stale", user_id=self.user_id)
+
+    @override_settings(DIFY_API_KEY=api_key, DIFY_API_BASE_URL=base_url)
+    def test_unrelated_400_and_404_remain_generic(self):
+        for status_code, payload in (
+            (400, {"code": "invalid_param", "message": "Invalid input."}),
+            (404, {"code": "not_found", "message": "Workflow Not Found."}),
+        ):
+            with self.subTest(status_code=status_code):
+                post = self.mock_response()
+                post.return_value.status_code = status_code
+                post.return_value.json.return_value = payload
+                error = requests.HTTPError("private provider body")
+                error.response = post.return_value
+                post.return_value.raise_for_status.side_effect = error
+
+                with self.assertRaises(services.AgentServiceError) as context:
+                    services.chat("hello", conversation_id="stale", user_id=self.user_id)
+                self.assertNotIsInstance(
+                    context.exception, services.ConversationUnavailableError
+                )
 
     @override_settings(DIFY_API_KEY=api_key, DIFY_API_BASE_URL=base_url)
     def test_malformed_json_raises_controlled_service_error(self):
@@ -1028,6 +1096,51 @@ class AgentStreamingServiceTests(TestCase):
 
         self.assertNotIn("private provider body", str(context.exception))
         self.assertNotIn(self.api_key, str(context.exception))
+
+    @override_settings(DIFY_API_BASE_URL=base_url, DIFY_API_KEY=api_key)
+    @patch("apps.agent.streaming.requests.post")
+    def test_stream_structured_stale_conversation_maps_to_specific_error(self, post):
+        response = self.make_response([])
+        response.status_code = 404
+        response.json.return_value = {
+            "code": "not_found",
+            "message": "Conversation Not Exists.",
+            "status": 404,
+        }
+        error = requests.HTTPError("private provider body")
+        error.response = response
+        response.raise_for_status.side_effect = error
+        post.return_value = response
+
+        with self.assertRaises(services.ConversationUnavailableError):
+            list(
+                streaming.stream_chat(
+                    "question", conversation_id="stale", user_id=self.user_id
+                )
+            )
+
+    @override_settings(DIFY_API_BASE_URL=base_url, DIFY_API_KEY=api_key)
+    @patch("apps.agent.streaming.requests.post")
+    def test_stream_event_stale_conversation_maps_to_specific_error(self, post):
+        post.return_value = self.make_response(
+            self.sse_lines(
+                [
+                    json.dumps(
+                        {
+                            "event": "error",
+                            "data": {
+                                "code": "not_found",
+                                "message": "Conversation Not Exists.",
+                                "status": 404,
+                            },
+                        }
+                    )
+                ]
+            )
+        )
+
+        with self.assertRaises(services.ConversationUnavailableError):
+            list(streaming.stream_chat("question", user_id=self.user_id))
 
     @override_settings(DIFY_API_BASE_URL=base_url, DIFY_API_KEY=api_key)
     @patch("apps.agent.streaming.requests.post", side_effect=requests.Timeout("private timeout"))

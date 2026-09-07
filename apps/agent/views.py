@@ -8,6 +8,9 @@ from .identity import attach_identity_cookie, resolve_identity
 
 
 MAX_MESSAGE_LENGTH = 2000
+CONVERSATION_UNAVAILABLE_MESSAGE = (
+    "This conversation can no longer be continued. Start a new conversation."
+)
 
 
 def chat(request):
@@ -105,6 +108,13 @@ def chat_api(request):
             503,
         )
         return attach_identity_cookie(response, identity)
+    except services.ConversationUnavailableError:
+        response = _error_response(
+            "conversation_unavailable",
+            CONVERSATION_UNAVAILABLE_MESSAGE,
+            409,
+        )
+        return attach_identity_cookie(response, identity)
     except Exception:
         response = _error_response(
             "agent_service_error",
@@ -184,6 +194,14 @@ def _stream_chat_events(message, conversation_id, user_id):
             {
                 "code": "agent_not_configured",
                 "message": "Agent service is not configured.",
+            },
+        )
+    except services.ConversationUnavailableError:
+        yield _sse_event(
+            "error",
+            {
+                "code": "conversation_unavailable",
+                "message": CONVERSATION_UNAVAILABLE_MESSAGE,
             },
         )
     except services.AgentServiceError:

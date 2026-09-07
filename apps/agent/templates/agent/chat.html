@@ -159,6 +159,7 @@
         const MAX_STORED_STATE_LENGTH = 100000;
         let conversationId = null;
         let persistedMessages = [];
+        let conversationRecoveryRequired = false;
 
         function storageAvailable() {
             try {
@@ -247,6 +248,7 @@
         function resetLocalState() {
             conversationId = null;
             persistedMessages = [];
+            conversationRecoveryRequired = false;
             try {
                 window.localStorage.removeItem(localStorageKey);
             } catch (error) {
@@ -324,9 +326,20 @@
         }
 
         function setBusy(isBusy) {
-            input.disabled = isBusy;
-            sendButton.disabled = isBusy;
+            input.disabled = isBusy || conversationRecoveryRequired;
+            sendButton.disabled = isBusy || conversationRecoveryRequired;
             newChatButton.disabled = isBusy;
+        }
+
+        function markConversationUnavailable() {
+            conversationRecoveryRequired = true;
+            conversationId = null;
+            try {
+                window.localStorage.removeItem(localStorageKey);
+            } catch (error) {
+                // In-memory recovery still prevents reuse on this page.
+            }
+            setStatus("当前会话已失效，请点击“新对话”重新开始。", "error");
         }
 
         function parseSseFrame(frame, dispatch) {
@@ -408,6 +421,7 @@
             if (conversationId) payload.conversation_id = conversationId;
             let assistantText = "";
             let streamError = false;
+            let conversationUnavailable = false;
 
             try {
                 const response = await fetch(endpoint, {
@@ -423,6 +437,12 @@
                     let messageText = "Agent 服务暂时不可用，请稍后重试。";
                     try {
                         const data = await response.json();
+                        if (data && data.code === "conversation_unavailable") {
+                            conversationUnavailable = true;
+                            streamError = true;
+                            markConversationUnavailable();
+                            return;
+                        }
                         const knownCodes = ["agent_not_configured", "agent_stream_error", "invalid_request", "method_not_allowed"];
                         if (
                             data &&
@@ -465,11 +485,17 @@
                         setStatus("Agent 服务已连接。", "connected");
                         scrollMessages();
                     } else if (eventType === "error") {
-                        streamError = true;
+                        if (data.code === "conversation_unavailable") {
+                            conversationUnavailable = true;
+                            streamError = true;
+                            markConversationUnavailable();
+                        } else {
+                            streamError = true;
+                        }
                     }
                 });
 
-                if (streamError || result.failed || !result.completed) {
+                if ((streamError || result.failed || !result.completed) && !conversationUnavailable) {
                     setStatus("Agent 服务暂时不可用，请稍后重试。", "error");
                 }
             } catch (error) {
@@ -483,12 +509,12 @@
         composer.addEventListener("submit", function (event) {
             event.preventDefault();
             const message = input.value.trim();
-            if (!message || sendButton.disabled) return;
+            if (!message || sendButton.disabled || conversationRecoveryRequired) return;
             submitMessage(message);
         });
 
         newChatButton.addEventListener("click", function () {
-            if (sendButton.disabled) return;
+            if (newChatButton.disabled) return;
             resetLocalState();
         });
 
