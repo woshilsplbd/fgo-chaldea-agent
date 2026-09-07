@@ -805,6 +805,190 @@ class AgentStreamingServiceTests(TestCase):
 
     @override_settings(DIFY_API_BASE_URL=base_url, DIFY_API_KEY=api_key)
     @patch("apps.agent.streaming.requests.post")
+    def test_stream_retains_ids_from_message_when_message_end_omits_them(self, post):
+        post.return_value = self.make_response(
+            self.sse_lines(
+                [
+                    json.dumps(
+                        {
+                            "event": "message",
+                            "conversation_id": "conversation-from-message",
+                            "message_id": "message-from-message",
+                            "data": {"answer": "answer"},
+                        }
+                    ),
+                    json.dumps({"event": "message_end", "data": {}}),
+                ]
+            )
+        )
+
+        result = list(streaming.stream_chat("question", user_id=self.user_id))
+
+        self.assertEqual(
+            result[-1],
+            {
+                "type": "done",
+                "conversation_id": "conversation-from-message",
+                "message_id": "message-from-message",
+            },
+        )
+
+    @override_settings(DIFY_API_BASE_URL=base_url, DIFY_API_KEY=api_key)
+    @patch("apps.agent.streaming.requests.post")
+    def test_message_end_ids_confirm_or_update_earlier_metadata(self, post):
+        post.return_value = self.make_response(
+            self.sse_lines(
+                [
+                    json.dumps(
+                        {
+                            "event": "message",
+                            "data": {
+                                "answer": "answer",
+                                "conversation_id": "conversation-before-end",
+                                "message_id": "message-before-end",
+                            },
+                        }
+                    ),
+                    json.dumps(
+                        {
+                            "event": "message_end",
+                            "data": {
+                                "conversation_id": "conversation-at-end",
+                                "id": "message-at-end",
+                            },
+                        }
+                    ),
+                ]
+            )
+        )
+
+        result = list(streaming.stream_chat("question", user_id=self.user_id))
+
+        self.assertEqual(result[-1]["conversation_id"], "conversation-at-end")
+        self.assertEqual(result[-1]["message_id"], "message-at-end")
+
+    @override_settings(DIFY_API_BASE_URL=base_url, DIFY_API_KEY=api_key)
+    @patch("apps.agent.streaming.requests.post")
+    def test_stream_retains_safe_id_for_answer_node_fallback(self, post):
+        post.return_value = self.make_response(
+            self.sse_lines(
+                [
+                    json.dumps(
+                        {
+                            "event": "agent_thought",
+                            "data": {"conversation_id": "conversation-before-answer"},
+                        }
+                    ),
+                    json.dumps(
+                        {
+                            "event": "message_end",
+                            "data": {},
+                        }
+                    ),
+                    json.dumps(
+                        {
+                            "event": "node_finished",
+                            "data": {
+                                "node_type": "answer",
+                                "outputs": {"answer": "fallback answer"},
+                            },
+                        }
+                    ),
+                ]
+            )
+        )
+
+        result = list(streaming.stream_chat("question", user_id=self.user_id))
+
+        self.assertEqual(result[0], {"type": "delta", "text": "fallback answer"})
+        self.assertEqual(result[-1]["conversation_id"], "conversation-before-answer")
+
+    @override_settings(DIFY_API_BASE_URL=base_url, DIFY_API_KEY=api_key)
+    @patch("apps.agent.streaming.requests.post")
+    def test_stream_ignores_malformed_stream_ids(self, post):
+        post.return_value = self.make_response(
+            self.sse_lines(
+                [
+                    json.dumps(
+                        {
+                            "event": "message",
+                            "conversation_id": 123,
+                            "message_id": ["not-an-id"],
+                            "data": {"answer": "answer"},
+                        }
+                    ),
+                    json.dumps(
+                        {
+                            "event": "message_end",
+                            "data": {"conversation_id": None, "id": {}},
+                        }
+                    ),
+                ]
+            )
+        )
+
+        result = list(streaming.stream_chat("question", user_id=self.user_id))
+
+        self.assertEqual(
+            result[-1],
+            {"type": "done", "conversation_id": None, "message_id": None},
+        )
+
+    @override_settings(DIFY_API_BASE_URL=base_url, DIFY_API_KEY=api_key)
+    @patch("apps.agent.streaming.requests.post")
+    def test_stream_does_not_take_ids_from_answer_node_outputs(self, post):
+        post.return_value = self.make_response(
+            self.sse_lines(
+                [
+                    json.dumps(
+                        {
+                            "event": "node_finished",
+                            "data": {
+                                "node_type": "answer",
+                                "conversation_id": "node-private-conversation",
+                                "outputs": {"answer": "fallback answer"},
+                            },
+                        }
+                    ),
+                    json.dumps({"event": "message_end", "data": {}}),
+                ]
+            )
+        )
+
+        result = list(streaming.stream_chat("question", user_id=self.user_id))
+
+        self.assertEqual(result[-1]["conversation_id"], None)
+        self.assertNotIn("node-private-conversation", json.dumps(result))
+
+    @override_settings(DIFY_API_BASE_URL=base_url, DIFY_API_KEY=api_key)
+    @patch("apps.agent.streaming.requests.post")
+    def test_stream_does_not_take_ids_from_tool_outputs(self, post):
+        post.return_value = self.make_response(
+            self.sse_lines(
+                [
+                    json.dumps(
+                        {
+                            "event": "node_finished",
+                            "data": {
+                                "node_type": "tool",
+                                "conversation_id": "tool-private-conversation",
+                                "outputs": {"result": "private tool result"},
+                            },
+                        }
+                    ),
+                    json.dumps({"event": "message", "data": {"answer": "answer"}}),
+                    json.dumps({"event": "message_end", "data": {}}),
+                ]
+            )
+        )
+
+        result = list(streaming.stream_chat("question", user_id=self.user_id))
+
+        self.assertEqual(result[-1]["conversation_id"], None)
+        self.assertNotIn("tool-private-conversation", json.dumps(result))
+
+    @override_settings(DIFY_API_BASE_URL=base_url, DIFY_API_KEY=api_key)
+    @patch("apps.agent.streaming.requests.post")
     def test_stream_sanitizes_reasoning_before_yielding(self, post):
         post.return_value = self.make_response(
             self.sse_lines(

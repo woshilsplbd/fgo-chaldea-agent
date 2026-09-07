@@ -22,6 +22,51 @@ _REASONING_MARKER_RE = re.compile(
 )
 _PARTIAL_OPEN = "<think"
 _PARTIAL_CLOSE = "</think"
+_MAX_STREAM_ID_LENGTH = 256
+_ID_EVENT_NAMES = frozenset(
+    ("message", "message_end", "agent_thought", "message_file", "message_replace")
+)
+
+
+def _valid_stream_id(value):
+    """Return a bounded, non-empty stream identifier or ``None``."""
+    if not isinstance(value, str):
+        return None
+    value = value.strip()
+    if not value or len(value) > _MAX_STREAM_ID_LENGTH:
+        return None
+    return value
+
+
+def _remember_stream_ids(
+    event_name, event, data, conversation_id, message_id
+):
+    """Capture IDs from known Dify metadata fields, never arbitrary outputs."""
+    if event_name not in _ID_EVENT_NAMES:
+        return conversation_id, message_id
+
+    metadata = (event, data)
+    event_conversation_id = None
+    event_message_id = None
+    for source in metadata:
+        if not isinstance(source, dict):
+            continue
+        if event_conversation_id is None:
+            event_conversation_id = _valid_stream_id(source.get("conversation_id"))
+        if event_message_id is None:
+            event_message_id = _valid_stream_id(source.get("message_id"))
+        if event_message_id is None:
+            event_message_id = _valid_stream_id(source.get("id"))
+
+    # Earlier message/agent metadata establishes a fallback.  message_end is
+    # allowed to confirm or update it when the upstream completion arrives.
+    if event_name == "message_end":
+        conversation_id = event_conversation_id or conversation_id
+        message_id = event_message_id or message_id
+    else:
+        conversation_id = conversation_id or event_conversation_id
+        message_id = message_id or event_message_id
+    return conversation_id, message_id
 
 
 def _partial_suffix(value):
@@ -193,6 +238,8 @@ def stream_chat(message, conversation_id=None, *, user_id):
     def events():
         sanitizer = ReasoningSanitizer()
         message_end = None
+        retained_conversation_id = None
+        retained_message_id = None
         visible_answer = False
         answer_node_candidates = []
         try:
@@ -218,6 +265,13 @@ def stream_chat(message, conversation_id=None, *, user_id):
                 data = event.get("data")
                 if not isinstance(data, dict):
                     data = {}
+                retained_conversation_id, retained_message_id = _remember_stream_ids(
+                    event_name,
+                    event,
+                    data,
+                    retained_conversation_id,
+                    retained_message_id,
+                )
                 if event_name == "message":
                     chunk = data.get("answer")
                     safe_chunk = sanitizer.feed(chunk)
@@ -258,18 +312,15 @@ def stream_chat(message, conversation_id=None, *, user_id):
             if not visible_answer:
                 raise AgentServiceError("Dify returned an empty chat response")
 
-            completion_conversation_id = message_end.get("conversation_id")
-            completion_message_id = message_end.get(
-                "message_id", message_end.get("id")
-            )
-            if completion_conversation_id is not None and not isinstance(
-                completion_conversation_id, str
-            ):
-                raise AgentServiceError("Dify returned an invalid conversation ID")
-            if completion_message_id is not None and not isinstance(
-                completion_message_id, str
-            ):
-                raise AgentServiceError("Dify returned an invalid message ID")
+            completion_conversation_id = retained_conversation_id
+            completion_message_id = retained_message_id
+            if isinstance(message_end, dict):
+                completion_conversation_id = _valid_stream_id(
+                    message_end.get("conversation_id")
+                ) or completion_conversation_id
+                completion_message_id = _valid_stream_id(
+                    message_end.get("message_id")
+                ) or _valid_stream_id(message_end.get("id")) or completion_message_id
 
             yield {
                 "type": "done",
