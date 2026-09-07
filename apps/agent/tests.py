@@ -11,6 +11,7 @@ from django.test import Client, TestCase
 from django.urls import reverse
 
 from . import services
+from . import streaming
 from .management.commands import evaluate_agent
 
 
@@ -375,6 +376,205 @@ class DifyServiceTests(TestCase):
         self.assertEqual(response.json()["code"], "agent_service_error")
         self.assertNotIn("raw provider secret body", body)
         self.assertNotIn("test-dify-key", body)
+
+
+class AgentStreamingServiceTests(TestCase):
+    base_url = "https://dify.example/v1"
+    api_key = "test-dify-key"
+
+    def make_response(self, events):
+        response = Mock()
+        response.raise_for_status.return_value = None
+        response.iter_lines.return_value = events
+        return response
+
+    def sse_lines(self, events):
+        return [
+            line if isinstance(line, bytes) else f"data: {line}"
+            for line in events
+        ]
+
+    @override_settings(DIFY_API_BASE_URL=base_url, DIFY_API_KEY=api_key)
+    @patch("apps.agent.streaming.requests.post")
+    def test_stream_yields_visible_deltas_and_completion_metadata(self, post):
+        post.return_value = self.make_response(
+            self.sse_lines(
+                [
+                    json.dumps({"event": "message", "data": {"answer": "hello "}}),
+                    json.dumps(
+                        {
+                            "event": "message_end",
+                            "data": {
+                                "conversation_id": "conversation-1",
+                                "message_id": "message-1",
+                            },
+                        }
+                    ),
+                ]
+            )
+        )
+
+        result = list(streaming.stream_chat("hello"))
+
+        self.assertEqual(
+            result,
+            [
+                {"type": "delta", "text": "hello "},
+                {
+                    "type": "done",
+                    "conversation_id": "conversation-1",
+                    "message_id": "message-1",
+                },
+            ],
+        )
+        post.assert_called_once_with(
+            "https://dify.example/v1/chat-messages",
+            headers={
+                "Authorization": "Bearer test-dify-key",
+                "Content-Type": "application/json",
+            },
+            json={
+                "inputs": {},
+                "query": "hello",
+                "response_mode": "streaming",
+                "user": "chaldea-agent-dev",
+            },
+            timeout=30.0,
+            stream=True,
+        )
+        self.assertNotIn(self.api_key, json.dumps(result))
+
+    @override_settings(DIFY_API_BASE_URL=base_url, DIFY_API_KEY=api_key)
+    @patch("apps.agent.streaming.requests.post")
+    def test_stream_forwards_conversation_id_and_ignores_internal_events(self, post):
+        post.return_value = self.make_response(
+            self.sse_lines(
+                [
+                    json.dumps({"event": "workflow_started", "data": {"secret": "x"}}),
+                    "not-json",
+                    json.dumps({"event": "node_finished", "data": {"tool": "private"}}),
+                    json.dumps({"event": "message", "data": {"answer": "answer"}}),
+                    json.dumps(
+                        {
+                            "event": "message_end",
+                            "data": {"conversation_id": "conversation-2", "id": "message-2"},
+                        }
+                    ),
+                ]
+            )
+        )
+
+        result = list(streaming.stream_chat("follow up", conversation_id="conversation-1"))
+
+        self.assertEqual(result[0], {"type": "delta", "text": "answer"})
+        self.assertEqual(result[-1]["conversation_id"], "conversation-2")
+        self.assertNotIn("private", json.dumps(result))
+        self.assertEqual(post.call_args.kwargs["json"]["conversation_id"], "conversation-1")
+
+    @override_settings(DIFY_API_BASE_URL=base_url, DIFY_API_KEY=api_key)
+    @patch("apps.agent.streaming.requests.post")
+    def test_stream_sanitizes_reasoning_before_yielding(self, post):
+        post.return_value = self.make_response(
+            self.sse_lines(
+                [
+                    json.dumps({"event": "message", "data": {"answer": "<thi"}}),
+                    json.dumps({"event": "message", "data": {"answer": "nk>private</thi"}}),
+                    json.dumps({"event": "message", "data": {"answer": "nk>公开 **答案** https://example.com"}}),
+                    json.dumps({"event": "message_end", "data": {"conversation_id": "c"}}),
+                ]
+            )
+        )
+
+        result = list(streaming.stream_chat("question"))
+
+        self.assertEqual(result, [{"type": "delta", "text": "公开 **答案** https://example.com"}, {"type": "done", "conversation_id": "c", "message_id": None}])
+        self.assertNotIn("private", json.dumps(result))
+        self.assertNotIn("<think", json.dumps(result))
+
+    @override_settings(DIFY_API_BASE_URL=base_url, DIFY_API_KEY=api_key)
+    @patch("apps.agent.streaming.requests.post")
+    def test_stream_handles_dify_error_without_provider_details(self, post):
+        post.return_value = self.make_response(
+            self.sse_lines(
+                [
+                    json.dumps(
+                        {
+                            "event": "error",
+                            "data": {"code": "secret", "message": "private provider body"},
+                        }
+                    )
+                ]
+            )
+        )
+
+        with self.assertRaisesRegex(services.AgentServiceError, "reported an error") as context:
+            list(streaming.stream_chat("question"))
+
+        self.assertNotIn("private provider body", str(context.exception))
+        self.assertNotIn(self.api_key, str(context.exception))
+
+    @override_settings(DIFY_API_BASE_URL=base_url, DIFY_API_KEY=api_key)
+    @patch("apps.agent.streaming.requests.post", side_effect=requests.Timeout("private timeout"))
+    def test_stream_timeout_is_controlled(self, post):
+        with self.assertRaisesRegex(services.AgentServiceError, "timed out"):
+            streaming.stream_chat("question")
+
+    @override_settings(DIFY_API_BASE_URL=base_url, DIFY_API_KEY=api_key)
+    @patch("apps.agent.streaming.requests.post", side_effect=requests.ConnectionError("private connection"))
+    def test_stream_connection_failure_is_controlled(self, post):
+        with self.assertRaisesRegex(services.AgentServiceError, "request failed"):
+            streaming.stream_chat("question")
+
+    @override_settings(DIFY_API_BASE_URL=base_url, DIFY_API_KEY=api_key)
+    @patch("apps.agent.streaming.requests.post")
+    def test_stream_premature_end_is_controlled(self, post):
+        post.return_value = self.make_response(
+            self.sse_lines([json.dumps({"event": "message", "data": {"answer": "partial"}})])
+        )
+
+        with self.assertRaisesRegex(services.AgentServiceError, "before message_end"):
+            list(streaming.stream_chat("question"))
+
+    @override_settings(DIFY_API_BASE_URL=base_url, DIFY_API_KEY=api_key)
+    @patch("apps.agent.streaming.requests.post")
+    def test_reasoning_only_stream_does_not_leak_or_complete(self, post):
+        post.return_value = self.make_response(
+            self.sse_lines(
+                [
+                    json.dumps({"event": "message", "data": {"answer": "<think>private thoughts</think>"}}),
+                    json.dumps({"event": "message_end", "data": {"conversation_id": "c"}}),
+                ]
+            )
+        )
+
+        with self.assertRaisesRegex(services.AgentServiceError, "empty chat response"):
+            list(streaming.stream_chat("question"))
+
+    def test_stateful_sanitizer_preserves_visible_text_and_split_controls(self):
+        sanitizer = streaming.ReasoningSanitizer()
+        output = "".join(
+            sanitizer.feed(chunk)
+            for chunk in ("前", "<thi", "nk>private</thi", "nk>后 ", "<!--dify-", "deepseek-reasoning-->", "答案")
+        ) + sanitizer.finish()
+
+        self.assertEqual(output, "前后 答案")
+
+    def test_stateful_sanitizer_removes_multiple_reasoning_blocks(self):
+        sanitizer = streaming.ReasoningSanitizer()
+
+        output = sanitizer.feed(
+            "开头<think>first</think>中间"
+            "<think>second</think>结尾"
+        ) + sanitizer.finish()
+
+        self.assertEqual(output, "开头中间结尾")
+
+    def test_stateful_sanitizer_discards_unclosed_reasoning(self):
+        sanitizer = streaming.ReasoningSanitizer()
+
+        output = sanitizer.feed("Visible <think>private") + sanitizer.finish()
+
+        self.assertEqual(output, "Visible ")
 
 
 class AgentEvaluationCommandTests(TestCase):

@@ -85,3 +85,10 @@ def chat(message, conversation_id=None):
         "conversation_id": conversation_id,
         "message_id": message_id,
     }
+
+
+def stream_chat(message, conversation_id=None):
+    """Return the production streaming service iterator."""
+    from .streaming import stream_chat as _stream_chat
+
+    return _stream_chat(message, conversation_id=conversation_id)
