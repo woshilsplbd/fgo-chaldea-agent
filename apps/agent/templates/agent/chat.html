@@ -3,19 +3,112 @@
 {% block title %}迦勒底智能终端{% endblock %}
 
 {% block content %}
+<style>
+    #agent-chat .agent-header-title,
+    #agent-chat #agent-conversation-title {
+        color: #ffffff;
+        text-shadow: 0 1px 2px rgba(0, 0, 0, .45);
+    }
+
+    #agent-chat .agent-intro,
+    #agent-chat .agent-status {
+        color: #e2e8f0;
+    }
+
+    #agent-chat .agent-messages {
+        min-height: 220px;
+        max-height: 58vh;
+        margin: 0 0 18px;
+        padding: 16px;
+        overflow-y: auto;
+        border: 1px solid rgba(196, 181, 253, .32);
+        border-radius: 8px;
+        background: rgba(15, 23, 42, .72);
+    }
+
+    #agent-chat .agent-status {
+        margin: 0 0 12px;
+        font-size: 13px;
+    }
+
+    #agent-chat .agent-status-error {
+        color: #fca5a5;
+    }
+
+    #agent-chat .agent-message {
+        margin: 0 0 14px;
+        padding: 11px 14px;
+        border-radius: 8px;
+        color: #f8fafc;
+        line-height: 1.7;
+        overflow-wrap: anywhere;
+    }
+
+    #agent-chat .agent-user-message {
+        background: rgba(91, 33, 182, .5);
+    }
+
+    #agent-chat .agent-assistant-message {
+        background: rgba(30, 41, 59, .9);
+    }
+
+    #agent-chat .agent-message-label {
+        display: block;
+        margin-bottom: 4px;
+        color: #fef3c7;
+    }
+
+    #agent-chat .agent-markdown h2,
+    #agent-chat .agent-markdown h3,
+    #agent-chat .agent-markdown h4 {
+        margin: 8px 0;
+        color: #fef3c7;
+        font-weight: 700;
+    }
+
+    #agent-chat .agent-markdown p {
+        margin: 0 0 8px;
+    }
+
+    #agent-chat .agent-markdown ul {
+        margin: 4px 0 10px;
+        padding-left: 22px;
+    }
+
+    #agent-chat .agent-markdown li {
+        margin: 3px 0;
+        list-style-type: disc;
+    }
+
+    #agent-chat .agent-markdown li.agent-ordered-item {
+        list-style-type: decimal;
+    }
+
+    #agent-chat .agent-markdown code {
+        padding: 2px 5px;
+        border-radius: 4px;
+        color: #fef3c7;
+        background: rgba(15, 23, 42, .8);
+    }
+
+    #agent-chat .agent-markdown a {
+        color: #93c5fd;
+        text-decoration: underline;
+    }
+</style>
 <main id="agent-chat" class="fgo-page">
     <div class="container">
         <div class="row">
             <div class="col-md-10 col-md-offset-1">
                 <header class="fgo-card">
-                    <h1 class="fgo-section-header">迦勒底智能终端</h1>
-                    <p>Chaldea Agent 将帮助你查询和理解 FGO 游戏知识。</p>
+                    <h1 class="fgo-section-header agent-header-title">迦勒底智能终端</h1>
+                    <p class="agent-intro">Chaldea Agent 将帮助你查询和理解 FGO 游戏知识。</p>
                 </header>
 
                 <section class="fgo-card" aria-labelledby="agent-conversation-title">
                     <h2 id="agent-conversation-title">Chaldea Agent</h2>
                     <div id="agent-messages" class="agent-messages" aria-live="polite">
-                        <p id="agent-status" class="text-muted" role="status">Agent 后端尚未连接。</p>
+                        <p id="agent-status" class="agent-status" data-state="idle" role="status">Agent 服务状态：等待首次请求。</p>
                     </div>
 
                     <form id="agent-composer" class="input-group" method="post"
@@ -44,15 +137,67 @@
         const endpoint = composer.action;
         let conversationId = null;
 
-        function addMessage(label, text, className) {
-            const message = document.createElement("p");
-            message.className = className;
+        function renderMarkdown(text) {
+            const escaped = String(text).replace(/[&<>"']/g, function (character) {
+                return {
+                    "&": "&amp;",
+                    "<": "&lt;",
+                    ">": "&gt;",
+                    '"': "&quot;",
+                    "'": "&#39;"
+                }[character];
+            });
+            const links = [];
+            let markdown = escaped.replace(/\[([^\]]+)\]\((https?:\/\/[^\s)]+)\)/g, function (_, label, url) {
+                const token = "__AGENT_LINK_" + links.length + "__";
+                links.push({ token: token, label: label, url: url });
+                return token;
+            });
+            markdown = markdown.replace(/(^|[\s(])(https?:\/\/[^\s<]+)/g, function (_, prefix, url) {
+                return prefix + '<a href="' + url + '" target="_blank" rel="noopener noreferrer">' + url + "</a>";
+            });
+            markdown = markdown
+                .replace(/^### (.+)$/gm, "<h4>$1</h4>")
+                .replace(/^## (.+)$/gm, "<h3>$1</h3>")
+                .replace(/^# (.+)$/gm, "<h2>$1</h2>")
+                .replace(/`([^`]+)`/g, "<code>$1</code>")
+                .replace(/\*\*([^*]+)\*\*/g, "<strong>$1</strong>")
+                .replace(/\*([^*]+)\*/g, "<em>$1</em>")
+                .replace(/^\d+\. (.*)$/gm, '<li class="agent-ordered-item">$1</li>')
+                .replace(/^(?:- )(.*)$/gm, "<li>$1</li>")
+                .replace(/\n/g, "<br>");
+            links.forEach(function (link) {
+                markdown = markdown.replace(
+                    link.token,
+                    '<a href="' + link.url + '" target="_blank" rel="noopener noreferrer">' + link.label + "</a>"
+                );
+            });
+            return markdown;
+        }
+
+        function addMessage(label, text, className, markdown) {
+            const message = document.createElement("div");
+            message.className = "agent-message " + className;
             const prefix = document.createElement("strong");
+            prefix.className = "agent-message-label";
             prefix.textContent = label + "：";
             message.appendChild(prefix);
-            message.appendChild(document.createTextNode(text));
+            const body = document.createElement("div");
+            body.className = markdown ? "agent-markdown" : "agent-plain-text";
+            if (markdown) {
+                body.innerHTML = renderMarkdown(text);
+            } else {
+                body.textContent = text;
+            }
+            message.appendChild(body);
             messages.appendChild(message);
             message.scrollIntoView({ block: "nearest" });
+        }
+
+        function setStatus(message, state) {
+            status.textContent = message;
+            status.dataset.state = state;
+            status.className = "agent-status agent-status-" + state;
         }
 
         function setBusy(isBusy) {
@@ -65,10 +210,9 @@
             const message = input.value.trim();
             if (!message || sendButton.disabled) return;
 
-            addMessage("你", message, "agent-user-message");
+            addMessage("你", message, "agent-user-message", false);
             input.value = "";
-            status.textContent = "正在连接 Agent 服务……";
-            status.className = "text-muted";
+            setStatus("正在连接 Agent 服务……", "pending");
             setBusy(true);
 
             const payload = { message: message };
@@ -90,19 +234,16 @@
                 .then(function (result) {
                     const data = result.data;
                     if (!result.response.ok || !data.ok) {
-                        status.textContent = data.message || "Agent 服务暂时不可用。";
-                        status.className = "text-danger";
+                        setStatus(data.message || "Agent 服务暂时不可用。", "error");
                         return;
                     }
 
                     conversationId = data.conversation_id || null;
-                    addMessage("Agent", data.answer || "", "agent-assistant-message");
-                    status.textContent = "Agent 服务已连接。";
-                    status.className = "text-muted";
+                    addMessage("Agent", data.answer || "", "agent-assistant-message", true);
+                    setStatus("Agent 服务已连接。", "connected");
                 })
                 .catch(function () {
-                    status.textContent = "Agent 服务暂时不可用，请稍后重试。";
-                    status.className = "text-danger";
+                    setStatus("Agent 服务暂时不可用，请稍后重试。", "error");
                 })
                 .finally(function () {
                     setBusy(false);
