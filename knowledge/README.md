@@ -45,7 +45,7 @@ The archive and strategy sources below are project-authored material; they are n
 
 ## Evaluation coverage
 
-The frozen `v2/evals/rag_cases.json` references all five corpus sources. Every `knowledge_hit`, `retrieval_discrimination`, and `follow_up` case has a cited section below.
+The frozen `evals/rag_cases.json` references all five corpus sources. Every `knowledge_hit`, `retrieval_discrimination`, and `follow_up` case has a cited section below.
 
 | Case ID | Knowledge document | Relevant section heading |
 | --- | --- | --- |

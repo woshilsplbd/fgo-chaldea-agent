@@ -3,7 +3,7 @@
 Create a **new** Render Web Service for the V2 application. Do not replace the legacy root project service.
 
 - **Branch:** `feat/fgo-agent`
-- **Root Directory:** `v2`
+- **Root Directory:** repository root
 - **Build Command:** `./build.sh`
 - **Start Command:** `gunicorn config.wsgi:application`
 

@@ -26,7 +26,7 @@ Also record `hallucination` (`true`/`false`) and `retrieval_used` (`true`/`false
 
 ## Running the raw baseline
 
-From `v2/`, using the project environment:
+From the repository root, using the project environment:
 
 ```text
 ..\.venv\Scripts\python.exe manage.py evaluate_agent \
