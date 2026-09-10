@@ -25,8 +25,7 @@
 ## 项目亮点
 
 - **Multi-source Agent：** 将 Knowledge Retrieval、`lookup_servant`、Tavily Search 和 Memory 组合在同一条 Agent 体验中。
-- **Conversation-aware RAG：** 使用 Query Rewriter 将依赖上下文的表达改写为独立检索问题，改善“那它有什么效果？”这类指代查询。### Conversation-aware RAG
-![Multi-turn conversation demo](docs/images/chaldea-agent-conversation.png)
+- **Conversation-aware RAG：** 使用 Query Rewriter 将依赖上下文的表达改写为独立检索问题，改善“那它有什么效果？”这类指代查询。
 - **Conversation continuity：** 通过 `conversation_id` 和浏览器端 transcript recovery 延续对话体验。
 - **Anonymous-user isolation：** 服务端生成匿名身份，并通过签名 HttpOnly Cookie 绑定到独立的 Dify user。
 - **Reliability：** 对 stale conversation 状态进行恢复，并隔离内部 Dify payload 与对外响应。
@@ -64,6 +63,8 @@ Dify Chatflow
 Agent Memory 能理解上下文，并不代表 Knowledge Retrieval 会自动获得完整检索问题。例如用户说“那它有什么效果？”，如果直接检索，查询本身缺少实体信息。
 
 项目使用 Memory-aware Query Rewriter，在进入 Knowledge Retrieval 前，把当前问题改写为包含必要上下文的 standalone retrieval query。这里关注的是检索链路的职责分离，不对准确率做未经验证的量化承诺。
+
+![Multi-turn conversation demo](docs/images/chaldea-agent-conversation.png)
 
 ### Anonymous user isolation
 
