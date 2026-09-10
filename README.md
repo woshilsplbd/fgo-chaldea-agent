@@ -4,6 +4,10 @@
 
 这个项目从传统的 FGO 资料网站逐步演进为一个多来源 Knowledge Agent：通过 RAG、结构化工具调用、Web Search 和多轮上下文，为用户提供更适合自然语言交互的知识检索体验。
 
+在线体验： [https://chaldea-archive-v2.onrender.com/agent/](https://chaldea-archive-v2.onrender.com/agent/)
+
+原始 Django Web 项目： [https://github.com/woshilsplbd/fgo-chaldea-archive](https://github.com/woshilsplbd/fgo-chaldea-archive)
+
 ## 技术栈
 
 | 方向 | 技术 |
