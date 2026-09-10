@@ -8,6 +8,10 @@
 
 原始 Django Web 项目： [https://github.com/woshilsplbd/fgo-chaldea-archive](https://github.com/woshilsplbd/fgo-chaldea-archive)
 
+## 项目预览
+
+![Chaldea Agent UI](docs/images/chaldea-agent-ui.png)
+
 ## 技术栈
 
 | 方向 | 技术 |
@@ -21,7 +25,8 @@
 ## 项目亮点
 
 - **Multi-source Agent：** 将 Knowledge Retrieval、`lookup_servant`、Tavily Search 和 Memory 组合在同一条 Agent 体验中。
-- **Conversation-aware RAG：** 使用 Query Rewriter 将依赖上下文的表达改写为独立检索问题，改善“那它有什么效果？”这类指代查询。
+- **Conversation-aware RAG：** 使用 Query Rewriter 将依赖上下文的表达改写为独立检索问题，改善“那它有什么效果？”这类指代查询。### Conversation-aware RAG
+![Multi-turn conversation demo](docs/images/chaldea-agent-conversation.png)
 - **Conversation continuity：** 通过 `conversation_id` 和浏览器端 transcript recovery 延续对话体验。
 - **Anonymous-user isolation：** 服务端生成匿名身份，并通过签名 HttpOnly Cookie 绑定到独立的 Dify user。
 - **Reliability：** 对 stale conversation 状态进行恢复，并隔离内部 Dify payload 与对外响应。
